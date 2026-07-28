@@ -1,7 +1,7 @@
 # Deploying Curio to the Pi
 
-Target from the brief: Pi 3, 1GB RAM, already running OpenClaw, a Flask blog and a
-StreetEasy monitor. Tailscale + Cloudflare Tunnel available. ~$0 running cost.
+Target: Pi 3, 1GB RAM, already running OpenClaw, a Flask blog and a
+StreetEasy monitor. Public access via Tailscale Funnel. ~$0 running cost.
 
 The whole thing is one Python process plus a directory of static files. Nothing
 heavyweight runs locally — the LLM layer is plain HTTPS calls to OpenRouter.
@@ -69,24 +69,41 @@ journalctl -u curio -f
 The unit sets `MemoryMax=200M`. Waitress with 4 threads should sit far below that —
 if it doesn't, something is wrong; investigate rather than raising the cap.
 
-## 5. Cloudflare Tunnel
+## 5. Going public — Tailscale Funnel
 
-Add an ingress rule to your existing tunnel config pointing your hostname at
-`http://127.0.0.1:5000`:
+The brief assumed a Cloudflare Tunnel. On the actual Pi there is no
+`cloudflared`, ngrok is already serving the blog (its free tier allows one
+agent), and there is no domain — so Funnel is the fit: `tailscaled` is already
+running, so it costs no extra process, and it provides a permanent hostname
+with a real certificate for free.
 
-```yaml
-ingress:
-  - hostname: curio.example.com
-    service: http://127.0.0.1:5000
-  # … your existing services …
-  - service: http_status:404
+Enable HTTPS and Funnel for the tailnet once, in the admin console under
+**DNS → HTTPS Certificates** and **Access Controls**. Then:
+
+```bash
+sudo tailscale funnel --bg 5000
+tailscale funnel status          # prints the public https:// URL
 ```
 
-Then `sudo systemctl restart cloudflared`.
+Curio keeps listening on `127.0.0.1:5000`; Funnel terminates TLS and proxies to
+it, so nothing about the service or the firewall changes.
 
-Make sure `CURIO_PUBLIC_URL` matches the public hostname — it's used for email
-links and the OpenRouter attribution header. Keep `CURIO_COOKIE_SECURE=1`; the
-tunnel terminates TLS, so cookies are travelling over HTTPS.
+Then point the app at that hostname:
+
+```bash
+bash deploy/set-public-url.sh https://<your-host>.ts.net
+sudo systemctl restart curio
+```
+
+`CURIO_PUBLIC_URL` is used for email links and the OpenRouter attribution
+header, and `CURIO_COOKIE_SECURE` has to go back to `1` at the same moment. The
+script does both together on purpose: a Secure cookie is never sent over plain
+http, so changing one without the other yields an app that silently cannot log
+anyone in.
+
+Funnel is genuinely public and signup is open, so the abuse guards in `.env`
+(`CURIO_DAILY_CAP_*`, `CURIO_SIGNUP_CAP_IP`) are load-bearing from this point
+on, not decorative. To take it offline again: `sudo tailscale funnel --https=443 off`.
 
 ## 6. Cron
 

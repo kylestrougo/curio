@@ -11,7 +11,7 @@ import os
 import secrets
 from pathlib import Path
 
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, current_app, jsonify, send_from_directory
 
 from .config import Config
 
@@ -79,11 +79,13 @@ def _configure_secret_key(app: Flask) -> None:
 
 def _register_frontend(app: Flask) -> None:
     """Serve the Vite build, with SPA fallback for client-side views."""
-    static_dir = Path(app.config["STATIC_DIR"])
 
     @app.get("/", defaults={"path": ""})
     @app.get("/<path:path>")
     def spa(path: str):
+        # Read the config per request rather than closing over it at startup,
+        # so the build directory can be repointed without rebuilding the app.
+        static_dir = Path(current_app.config["STATIC_DIR"])
         if path.startswith("api/"):
             return jsonify({"error": "not_found", "message": "No such endpoint."}), 404
         if not static_dir.exists():
@@ -94,7 +96,13 @@ def _register_frontend(app: Flask) -> None:
                 "<code>frontend/</code>, or use <code>npm run dev</code> for local work.</p>",
                 200,
             )
-        candidate = static_dir / path
-        if path and candidate.is_file():
-            return send_from_directory(static_dir, path)
+        # Resolve and confirm the target is genuinely inside the build directory.
+        # send_from_directory already blocks traversal, but relying on that alone
+        # makes the guarantee depend on URL-normalisation subtleties; this is
+        # explicit and cheap. Anything else falls through to the SPA.
+        if path:
+            root = static_dir.resolve()
+            candidate = (root / path).resolve()
+            if candidate.is_file() and candidate.is_relative_to(root):
+                return send_from_directory(root, candidate.relative_to(root))
         return send_from_directory(static_dir, "index.html")

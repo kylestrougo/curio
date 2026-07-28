@@ -7,7 +7,6 @@ services. `cron` costs nothing when it isn't running.
 from __future__ import annotations
 
 import click
-from flask import current_app
 from flask.cli import with_appcontext
 
 from .db import execute, query
@@ -30,9 +29,9 @@ def send_due_emails_command(user_id):
 def housekeeping_command():
     """Nightly tidy: prune old rate-limit counters, stats, and spent door tokens."""
     counters = prune_counters(keep_days=7)
-    stats = execute("DELETE FROM model_stats WHERE created_at < datetime('now', '-30 days')")
-    tokens = execute("DELETE FROM door_tokens WHERE created_at < datetime('now', '-30 days')")
-    click.echo(f"pruned counters={counters} (stats and tokens older than 30d also removed)")
+    execute("DELETE FROM model_stats WHERE created_at < datetime('now', '-30 days')")
+    execute("DELETE FROM door_tokens WHERE created_at < datetime('now', '-30 days')")
+    click.echo(f"pruned {counters} rate-limit counters; stats and door tokens older than 30d removed")
 
 
 @click.command("make-admin")

@@ -156,7 +156,8 @@ quietly, and never counts days or breaks streaks.
 | `GET` | `/api/email-prefs` | → prefs for current user |
 | `PUT` | `/api/email-prefs` | `{enabled, topics: [], wildcard, sendHour, frequency}` |
 | `GET` | `/unsub/:token` | one-click, no login, honored instantly |
-| `GET` | `/d/:token` | deep link from an email — opens the app already on that door |
+| `GET` | `/d/:token` | deep link from an email — redirects to `/?door=:token` |
+| `GET` | `/api/door/:token` | exchanges that token for `{label, type}` so the client can open the page |
 
 `frequency` is `daily` | `weekdays` | `weekly`. Users who configure nothing get
 nothing. No open tracking, no re-engagement copy, no escalating frequency.

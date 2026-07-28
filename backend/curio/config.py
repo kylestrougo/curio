@@ -8,7 +8,23 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+
+
+def _load_env(path: Path) -> None:
+    """Load .env, letting it beat anything already in the environment.
+
+    override=True is deliberate. Without it an unrelated export in the operator's
+    shell silently shadows the file they actually edited — and because systemd
+    passes the same file in as EnvironmentFile, the result is a service that
+    works while `flask ...` in a terminal fails against the same config, which is
+    a genuinely baffling thing to debug. A key exported for some other tool is
+    far more likely to be stale than the file deployed next to the app, so the
+    file wins.
+    """
+    load_dotenv(path, override=True)
+
+
+_load_env(BASE_DIR / ".env")
 
 
 def _bool(name: str, default: bool = False) -> bool:

@@ -117,6 +117,18 @@ cd /home/io/curio/backend && .venv/bin/flask model-status --days 7
 The free list churns constantly. When one starts failing, reorder the chain from
 `/admin` — no restart, no deploy.
 
+**Which free models are *fast*?**
+```bash
+.venv/bin/flask bench-models              # the current chain
+.venv/bin/flask bench-models --all-free   # the whole catalogue, slow
+```
+Runs a real page generation against each, checks the result actually honours the
+page contract, and ranks the survivors by median latency — ending with a chain
+you can paste straight into `/admin`. Contract first, speed second: a model that
+answers in two seconds with four buttons is worse than a slower one that gets it
+right, so off-contract models are excluded from the ranking rather than ranked
+badly. Sequential on purpose; parallel benchmarking just measures rate limits.
+
 **Test the email without waiting for cron:**
 ```bash
 .venv/bin/flask send-due-emails --user-id 1     # ignores the schedule

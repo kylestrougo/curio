@@ -246,24 +246,30 @@ def generate(
     raise LLMError(last_error)
 
 
-def generate_raw(model: str, system: str, user: str, max_tokens: int = 1000) -> dict:
-    """Single-model call that reports what happened — powers the admin test button."""
+def generate_raw(
+    model: str, system: str, user: str, max_tokens: int = 1000, intent: str = "admin_test"
+) -> dict:
+    """Single-model call that reports what happened — powers the admin test button.
+
+    `intent` is recorded against the call so a bulk benchmark doesn't masquerade
+    as ordinary admin testing in the stats.
+    """
     started = time.monotonic()
     try:
         raw = _post(model, system, user, max_tokens, json_mode=True)
     except (LLMError, requests.RequestException) as exc:
         elapsed = int((time.monotonic() - started) * 1000)
-        _record(model, "admin_test", False, elapsed, str(exc))
+        _record(model, intent, False, elapsed, str(exc))
         return {"ok": False, "raw": None, "parsed": None, "latencyMs": elapsed, "error": str(exc)}
 
     elapsed = int((time.monotonic() - started) * 1000)
     try:
         parsed = parse_json_loose(raw)
     except ValueError as exc:
-        _record(model, "admin_test", False, elapsed, f"unparseable: {exc}")
+        _record(model, intent, False, elapsed, f"unparseable: {exc}")
         return {"ok": False, "raw": raw, "parsed": None, "latencyMs": elapsed, "error": str(exc)}
 
-    _record(model, "admin_test", True, elapsed, None)
+    _record(model, intent, True, elapsed, None)
     return {"ok": True, "raw": raw, "parsed": parsed, "latencyMs": elapsed, "error": None}
 
 

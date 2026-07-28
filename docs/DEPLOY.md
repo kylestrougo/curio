@@ -129,6 +129,21 @@ answers in two seconds with four buttons is worse than a slower one that gets it
 right, so off-contract models are excluded from the ranking rather than ranked
 badly. Sequential on purpose; parallel benchmarking just measures rate limits.
 
+**Keeping the chain alive by itself**
+```bash
+.venv/bin/flask refresh-chain --dry-run    # what it would do
+```
+`crontab.example` runs this twice a week. It verifies the chain still works and
+rebuilds it from the catalogue only when it doesn't — a dead chain takes the
+whole app down, and the catalogue churns enough that this happens. It will not
+reorder a working chain to chase a faster model, and it will not empty the chain
+if nothing passes: a stale chain can recover when a provider comes back, an
+empty one just fails every tap. `--force` re-ranks deliberately.
+
+Automating the *repair* but not the *promotion* is the point. Latency is the
+only thing a benchmark can judge, and it says nothing about whether the writing
+is any good — that stays a human call, made from `/admin`.
+
 **Test the email without waiting for cron:**
 ```bash
 .venv/bin/flask send-due-emails --user-id 1     # ignores the schedule

@@ -1,4 +1,4 @@
-# Curio scheduled jobs — install with `crontab -e` as the `pi` user.
+# Curio scheduled jobs — install with `crontab -e` as the `io` user.
 #
 # No long-lived scheduler process: the brief targets a Pi 3 already running
 # several services, and an APScheduler thread would sit in memory all day for
@@ -18,3 +18,16 @@ FLASK=/home/io/curio/backend/.venv/bin/flask
 # Nightly backup. SQLite's .backup is safe against a live WAL database —
 # a plain `cp` of a file being written is not.
 30 3 * * * /home/io/curio/deploy/backup.sh >> /home/io/curio/logs/backup.log 2>&1
+
+# Repair the model chain if it has rotted. The free catalogue churns without
+# notice — models get renamed and retired, and a chain that worked last week
+# can be entirely dead this week, which takes the whole app down with it.
+#
+# This checks the chain still works and only rebuilds it when it doesn't. It
+# will NOT reorder a working chain to chase a faster model: latency is the one
+# thing a benchmark can judge, and it says nothing about whether the pages are
+# any good. Choosing on quality stays a human decision, made from /admin.
+#
+# Twice a week, at an hour nobody is reading. Costs ~3 free-tier calls when the
+# chain is healthy, which is the usual case.
+40 4 * * 1,4 cd $CURIO && $FLASK refresh-chain >> /home/io/curio/logs/chain.log 2>&1

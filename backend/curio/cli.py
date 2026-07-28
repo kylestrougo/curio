@@ -94,36 +94,18 @@ def _check_page_contract(parsed) -> str | None:
     return None
 
 
-@click.command("bench-models")
-@click.option("--models", default=None, help="Comma-separated model ids. Defaults to the current chain.")
-@click.option("--all-free", is_flag=True, help="Benchmark every free model in the catalogue (slow).")
-@click.option("--repeat", type=int, default=1, help="Calls per model; median is reported.")
-@with_appcontext
-def bench_models_command(models, all_free, repeat):
-    """Time the free models on a real page generation and check the JSON contract.
+def _bench(ids, repeat, echo=None):
+    """Time each model on a real page generation. Returns [(ms|None, id, failure)].
 
-    Deliberately sequential. Firing these in parallel is how you trip the free
-    tier's rate limits and end up benchmarking 429s instead of models.
+    Sequential on purpose: firing these in parallel measures the free tier's
+    rate limiter rather than the models.
     """
     from statistics import median
 
-    from .llm import generate_raw, list_free_models
     from . import prompts
-
-    if models:
-        ids = [m.strip() for m in models.split(",") if m.strip()]
-    elif all_free:
-        ids = [m["id"] for m in list_free_models()]
-    else:
-        ids = get_chain()
-    if not ids:
-        click.echo("Nothing to benchmark.")
-        return
+    from .llm import generate_raw
 
     system, user = prompts.page("Why do we dream?", "question", [], False, [])
-    est = len(ids) * repeat * 12
-    click.echo(f"{len(ids)} model(s) × {repeat} — roughly {est // 60}m{est % 60:02d}s if all respond\n")
-
     results = []
     for mid in ids:
         latencies, failure = [], None
@@ -138,14 +120,44 @@ def bench_models_command(models, all_free, repeat):
                 break
             latencies.append(r["latencyMs"])
         if failure:
-            click.echo(f"  ✗ {mid} — {failure}")
             results.append((None, mid, failure))
+            if echo:
+                echo(f"  ✗ {mid} — {failure}")
         else:
             ms = int(median(latencies))
-            click.echo(f"  ✓ {mid} — {ms}ms")
             results.append((ms, mid, None))
+            if echo:
+                echo(f"  ✓ {mid} — {ms}ms")
+    return results
 
-    good = sorted([r for r in results if r[0] is not None])
+
+def _usable(results):
+    return sorted([r for r in results if r[0] is not None])
+
+
+@click.command("bench-models")
+@click.option("--models", default=None, help="Comma-separated model ids. Defaults to the current chain.")
+@click.option("--all-free", is_flag=True, help="Benchmark every free model in the catalogue (slow).")
+@click.option("--repeat", type=int, default=1, help="Calls per model; median is reported.")
+@with_appcontext
+def bench_models_command(models, all_free, repeat):
+    """Time the free models on a real page generation and check the JSON contract."""
+    from .llm import list_free_models
+
+    if models:
+        ids = [m.strip() for m in models.split(",") if m.strip()]
+    elif all_free:
+        ids = [m["id"] for m in list_free_models()]
+    else:
+        ids = get_chain()
+    if not ids:
+        click.echo("Nothing to benchmark.")
+        return
+
+    est = len(ids) * repeat * 12
+    click.echo(f"{len(ids)} model(s) × {repeat} — roughly {est // 60}m{est % 60:02d}s if all respond\n")
+
+    good = _usable(_bench(ids, repeat, echo=click.echo))
     click.echo("\n── usable, fastest first ──")
     if not good:
         click.echo("None passed. Try --all-free, or check the key and quota.")
@@ -156,9 +168,65 @@ def bench_models_command(models, all_free, repeat):
     click.echo(",".join(mid for _, mid, _ in good[:3]))
 
 
+@click.command("refresh-chain")
+@click.option("--force", is_flag=True, help="Re-rank even when the current chain still works.")
+@click.option("--repeat", type=int, default=3, help="Calls per model; median is used.")
+@click.option("--top", type=int, default=3, help="How many models to keep in the chain.")
+@click.option("--dry-run", is_flag=True, help="Report what would change, change nothing.")
+@with_appcontext
+def refresh_chain_command(force, repeat, top, dry_run):
+    """Repair the model chain when it has rotted. Intended for cron.
+
+    The free catalogue churns: models are renamed and retired without notice,
+    and a chain that worked last week can be entirely dead this week. This
+    checks the chain still functions and rebuilds it from the catalogue when it
+    doesn't.
+
+    By default it will NOT reorder a chain that is merely slower than some
+    alternative. Speed is the only thing that can be measured automatically,
+    and it is a poor proxy for whether pages are worth reading — the contract
+    check catches malformed JSON, not dull or inaccurate writing. Promoting on
+    latency alone would let the product's voice drift with no one deciding it
+    should. Use --force when you have decided you want the fastest survivors,
+    or re-pick deliberately from /admin.
+    """
+    from .llm import CONFIG_KEY_CHAIN, list_free_models, set_config_json
+
+    current = get_chain()
+    click.echo(f"chain: {' → '.join(current) or '(empty)'}")
+
+    working = _usable(_bench(current, repeat, echo=click.echo)) if current else []
+    if working and not force:
+        click.echo(f"chain is healthy ({len(working)}/{len(current)} usable) — leaving it alone")
+        return
+
+    click.echo("chain is dead — rebuilding from the catalogue" if not force else "forced re-rank")
+    catalogue = [m["id"] for m in list_free_models()]
+    if not catalogue:
+        click.echo("catalogue returned nothing — leaving the chain alone")
+        raise SystemExit(1)
+
+    ranked = _usable(_bench(catalogue, repeat, echo=click.echo))
+    if not ranked:
+        # Better a stale chain than none: an empty chain makes every tap fail.
+        click.echo("nothing in the catalogue passed — leaving the chain alone")
+        raise SystemExit(1)
+
+    new = [mid for _, mid, _ in ranked[:top]]
+    if new == current:
+        click.echo("no change")
+        return
+    if dry_run:
+        click.echo(f"would set: {' → '.join(new)}")
+        return
+    set_config_json(CONFIG_KEY_CHAIN, new)
+    click.echo(f"chain updated: {' → '.join(new)}")
+
+
 def init_app(app) -> None:
     app.cli.add_command(send_due_emails_command)
     app.cli.add_command(housekeeping_command)
     app.cli.add_command(make_admin_command)
     app.cli.add_command(model_status_command)
     app.cli.add_command(bench_models_command)
+    app.cli.add_command(refresh_chain_command)

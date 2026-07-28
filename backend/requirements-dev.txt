@@ -1,0 +1,12 @@
+# Test-only dependencies. Not needed to run Curio — install these when you want
+# to run the suite (including on the Pi, to verify a deploy on real hardware):
+#
+#   .venv/bin/pip install -r requirements-dev.txt
+#   .venv/bin/python -m pytest tests -q
+#
+# The runtime set in requirements.txt is kept deliberately small for a 1GB Pi;
+# keeping the test runner out of it is part of that.
+
+-r requirements.txt
+
+pytest==9.1.1

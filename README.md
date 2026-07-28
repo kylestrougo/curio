@@ -76,7 +76,9 @@ npm run dev               # → http://localhost:5173, proxies /api to Flask
 
 **Tests**
 ```bash
-cd backend && .venv/bin/python -m pytest tests -q
+cd backend
+.venv/bin/pip install -r requirements-dev.txt   # pytest is not a runtime dep
+.venv/bin/python -m pytest tests -q
 ```
 
 Deployment to the Pi is in [`docs/DEPLOY.md`](docs/DEPLOY.md). The API contract —

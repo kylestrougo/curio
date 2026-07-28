@@ -16,9 +16,12 @@ echo "──────── host ────────"
 say INFO "$(uname -m) · $(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")"
 say INFO "model: $(cat /proc/device-tree/model 2>/dev/null | tr -d '\0' || true)$( [ -r /proc/device-tree/model ] || echo unknown )"
 say INFO "user: $(whoami)  home: $HOME"
-# The shipped unit hardcodes User=pi and /home/pi/curio.
-if [ "$(whoami)" != "pi" ]; then
-  say WARN "not 'pi' — curio.service needs User/Group/paths rewritten for '$(whoami)'"
+# The unit and the docs hardcode an account; check this box matches.
+unit_user=$(sed -n 's/^User=//p' "$(dirname "$0")/curio.service" 2>/dev/null | head -1)
+if [ -n "$unit_user" ] && [ "$(whoami)" != "$unit_user" ]; then
+  say WARN "curio.service says User=$unit_user but you are '$(whoami)' — paths need rewriting"
+elif [ -n "$unit_user" ]; then
+  say OK "curio.service matches this account ($unit_user)"
 fi
 
 echo "──────── memory ────────"

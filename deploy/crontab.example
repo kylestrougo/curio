@@ -4,17 +4,17 @@
 # several services, and an APScheduler thread would sit in memory all day for
 # a job that runs once an hour. cron costs nothing when idle.
 
-CURIO=/home/pi/curio/backend
-FLASK=/home/pi/curio/backend/.venv/bin/flask
+CURIO=/home/io/curio/backend
+FLASK=/home/io/curio/backend/.venv/bin/flask
 
 # Doors for today. Runs hourly; the command itself decides who is actually due
 # based on each user's send_hour, frequency, and last_sent_on — so a user who
 # picked 07:00 gets it at 07:00, and nobody gets two in a day.
-0 * * * * cd $CURIO && $FLASK send-due-emails >> /home/pi/curio/logs/email.log 2>&1
+0 * * * * cd $CURIO && $FLASK send-due-emails >> /home/io/curio/logs/email.log 2>&1
 
 # Nightly tidy: prune rate-limit counters, old model stats, spent door tokens.
-17 3 * * * cd $CURIO && $FLASK housekeeping >> /home/pi/curio/logs/housekeeping.log 2>&1
+17 3 * * * cd $CURIO && $FLASK housekeeping >> /home/io/curio/logs/housekeeping.log 2>&1
 
 # Nightly backup. SQLite's .backup is safe against a live WAL database —
 # a plain `cp` of a file being written is not.
-30 3 * * * /home/pi/curio/deploy/backup.sh >> /home/pi/curio/logs/backup.log 2>&1
+30 3 * * * /home/io/curio/deploy/backup.sh >> /home/io/curio/logs/backup.log 2>&1

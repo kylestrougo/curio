@@ -5,8 +5,8 @@
 # written to while this runs, so a plain file copy can capture a torn page.
 set -euo pipefail
 
-DB="${CURIO_DB:-/home/pi/curio/curio.db}"
-DEST="${CURIO_BACKUP_DIR:-/home/pi/curio/backups}"
+DB="${CURIO_DB:-/home/io/curio/curio.db}"
+DEST="${CURIO_BACKUP_DIR:-/home/io/curio/backups}"
 KEEP_DAYS=14
 
 mkdir -p "$DEST"

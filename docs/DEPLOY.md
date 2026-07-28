@@ -9,16 +9,21 @@ heavyweight runs locally — the LLM layer is plain HTTPS calls to OpenRouter.
 ## 1. Get the code onto the Pi
 
 ```bash
-git clone <this repo> /home/pi/curio
-cd /home/pi/curio
+git clone <this repo> /home/io/curio
+cd /home/io/curio
 ```
 
 ## 2. Backend
 
 ```bash
-cd /home/pi/curio/backend
+cd /home/io/curio/backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+
+# Optional but recommended on a first deploy: run the suite on the real
+# hardware before wiring up systemd.
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests -q
 
 cp .env.example .env
 # Fill in at minimum: OPENROUTER_API_KEY, CURIO_PUBLIC_URL, CURIO_ADMIN_EMAIL.
@@ -54,7 +59,7 @@ the Pi doesn't need a second web server in front of Curio.
 ## 4. systemd
 
 ```bash
-sudo cp /home/pi/curio/deploy/curio.service /etc/systemd/system/
+sudo cp /home/io/curio/deploy/curio.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now curio
 systemctl status curio
@@ -86,7 +91,7 @@ tunnel terminates TLS, so cookies are travelling over HTTPS.
 ## 6. Cron
 
 ```bash
-mkdir -p /home/pi/curio/logs /home/pi/curio/backups
+mkdir -p /home/io/curio/logs /home/io/curio/backups
 crontab -e   # paste from deploy/crontab.example
 ```
 
@@ -107,7 +112,7 @@ who picked 07:00 gets it at 07:00 while nobody receives two in a day.
 
 **Which free models are working?**
 ```bash
-cd /home/pi/curio/backend && .venv/bin/flask model-status --days 7
+cd /home/io/curio/backend && .venv/bin/flask model-status --days 7
 ```
 The free list churns constantly. When one starts failing, reorder the chain from
 `/admin` — no restart, no deploy.
@@ -121,7 +126,7 @@ The free list churns constantly. When one starts failing, reorder the chain from
 **Restore a backup:**
 ```bash
 sudo systemctl stop curio
-gunzip -c /home/pi/curio/backups/curio-YYYYMMDD-HHMMSS.db.gz > /home/pi/curio/curio.db
+gunzip -c /home/io/curio/backups/curio-YYYYMMDD-HHMMSS.db.gz > /home/io/curio/curio.db
 sudo systemctl start curio
 ```
 

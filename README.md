@@ -81,9 +81,11 @@ cd backend
 .venv/bin/python -m pytest tests -q
 ```
 
-Deployment to the Pi is in [`docs/DEPLOY.md`](docs/DEPLOY.md). The API contract —
-including one deliberate deviation from the original brief and why — is in
-[`docs/API.md`](docs/API.md).
+Deployment to the Pi is in [`docs/DEPLOY.md`](docs/DEPLOY.md), and
+[`docs/RUNBOOK.md`](docs/RUNBOOK.md) covers living with it once deployed — what
+is running where, what to check, and what to do when generation or email stops
+working. The API contract — including one deliberate deviation from the original
+brief and why — is in [`docs/API.md`](docs/API.md).
 
 ## Privacy
 

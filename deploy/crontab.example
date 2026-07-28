@@ -17,6 +17,7 @@ FLASK=/home/io/curio/backend/.venv/bin/flask
 
 # Nightly backup. SQLite's .backup is safe against a live WAL database —
 # a plain `cp` of a file being written is not.
+# Requires no sqlite3 CLI — the script drives the online backup API via python3.
 30 3 * * * /home/io/curio/deploy/backup.sh >> /home/io/curio/logs/backup.log 2>&1
 
 # Repair the model chain if it has rotted. The free catalogue churns without

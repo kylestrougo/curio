@@ -37,6 +37,7 @@ function tokens(v) {
 
 export default function Admin({ onDone }) {
   const [models, setModels] = useState(null);
+  const [modelsErr, setModelsErr] = useState(null);
   const [chain, setChain] = useState([]);
   const [overrides, setOverrides] = useState({});
   const [stats, setStats] = useState(null);
@@ -64,7 +65,11 @@ export default function Admin({ onDone }) {
     api
       .adminModels()
       .then((r) => live && setModels(r.models || r.data || []))
-      .catch(() => live && setModels([]));
+      .catch((e) => {
+        if (!live) return;
+        setModels([]);
+        setModelsErr(e.message || "Couldn't reach the catalogue.");
+      });
     api
       .adminStats()
       .then((r) => live && setStats(r.stats || r.models || []))
@@ -223,7 +228,7 @@ export default function Admin({ onDone }) {
       {models === null ? (
         <Loading>Reading the catalogue…</Loading>
       ) : catalogue.length === 0 ? (
-        <p className="empty">No free models came back from the catalogue.</p>
+        <p className="empty">{modelsErr || 'No free models came back from the catalogue.'}</p>
       ) : (
         <div className="modellist">
           {catalogue.map((m) => {
@@ -236,6 +241,7 @@ export default function Admin({ onDone }) {
                   <span className="mmeta">
                     {tokens(contextOf(m))} · {pct(rateOf(m))} ok · {ms(latencyOf(m))} p50
                   </span>
+                  {m.name && m.name !== id && <span className="mmeta">{m.name}</span>}
                 </span>
                 <button className="btn tiny ghost" onClick={() => add(id)} disabled={inChain}>
                   {inChain ? 'In chain' : 'Add'}
@@ -330,8 +336,8 @@ export default function Admin({ onDone }) {
                   <td>{modelId(s)}</td>
                   <td>{pick(s, 'calls', 'count') ?? '—'}</td>
                   <td>{pct(rateOf(s))}</td>
-                  <td>{ms(pick(s, 'p50', 'p50Ms'))}</td>
-                  <td>{ms(pick(s, 'p95', 'p95Ms'))}</td>
+                  <td>{ms(pick(s, 'p50Ms', 'p50'))}</td>
+                  <td>{ms(pick(s, 'p95Ms', 'p95'))}</td>
                   <td className="wrap">{pick(s, 'lastError', 'last_error') || '—'}</td>
                 </tr>
               ))}

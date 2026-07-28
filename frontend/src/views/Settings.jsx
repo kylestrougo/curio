@@ -64,8 +64,11 @@ export default function Settings({ onDone }) {
       frequency: prefs.frequency,
     };
     try {
-      await api.putEmailPrefs(body);
-      setPrefs((p) => ({ ...p, ...body }));
+      const r = await api.putEmailPrefs(body);
+      // The server echoes what it stored (it clamps the hour and the frequency).
+      const stored = r && 'enabled' in r ? r : body;
+      setPrefs((p) => ({ ...p, ...stored }));
+      if (Array.isArray(stored.topics)) setTopicsText(stored.topics.join('\n'));
       setStatus({ kind: 'good', text: 'Saved.' });
     } catch (e) {
       setStatus({ kind: 'bad', text: e.message || "That didn't save." });

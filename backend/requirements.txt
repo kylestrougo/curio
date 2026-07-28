@@ -1,0 +1,11 @@
+# Deliberately small. This runs on a Raspberry Pi 3 with 1GB RAM alongside
+# other services; the target is < 80MB RSS. No ORM, no agent framework, no
+# async stack — sqlite3 and requests are in/near the stdlib and cost nothing.
+Flask==3.0.3
+Flask-Login==0.6.3
+argon2-cffi==23.1.0
+requests==2.32.3
+python-dotenv==1.0.1
+
+# WSGI server for the systemd unit. Threaded workers, tiny footprint.
+waitress==3.0.0

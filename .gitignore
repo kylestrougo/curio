@@ -11,6 +11,13 @@ node_modules/
 dist/
 .vite/
 
+# ...except the frontend build, which is committed on purpose and served by
+# Flask. The Pi has 1GB of RAM and no Node, so it never runs vite; see
+# DEPLOY.md §3. Negating the directory (not just the files) is required — git
+# does not descend into an excluded directory, so `!frontend/dist/**` alone
+# would never match anything.
+!frontend/dist/
+
 # Local data & secrets
 *.db
 *.db-wal

@@ -9,6 +9,8 @@ Wording is carried over from the working prototype — it was tuned by hand and
 is not to be casually rewritten.
 """
 
+import random
+
 PERSONA = (
     "You are Curio, the knowledge engine behind a curiosity app. The user explores by tapping. "
     "You are accurate and never invent facts. You write for a curious, intelligent adult and prize "
@@ -29,11 +31,104 @@ _PAGE_SHAPE = (
 )
 
 
-def seeds(count: int, exclude: list[str]) -> tuple[str, str]:
+# Named domains, drawn fresh each call.
+#
+# The old prompt said "a very different domain (e.g. science, history, art,
+# technology, everyday life)" on every single call. Two problems with that: the
+# five examples became the whole world the model considered, and an identical
+# prompt every time samples the same distribution every time — so the doors
+# arrived varied *within* a hand and identical *across* hands. Naming specific
+# and different territory per call is what actually moves the output.
+_DOMAINS = [
+    "astronomy and cosmology",
+    "geology and deep time",
+    "microbiology and the invisible",
+    "animal behaviour",
+    "plants and fungi",
+    "human anatomy and medicine",
+    "the history of medicine",
+    "linguistics and writing systems",
+    "pre-modern history outside Europe",
+    "twentieth century history",
+    "archaeology",
+    "mathematics and its history",
+    "materials and manufacturing",
+    "civil engineering and infrastructure",
+    "computing and networks",
+    "cartography and navigation",
+    "visual art and architecture",
+    "music and acoustics",
+    "economics and trade",
+    "law and institutions",
+    "agriculture and food",
+    "textiles and clothing",
+    "religion and ritual",
+    "philosophy and ideas",
+    "psychology and perception",
+    "sport and games",
+    "transport and logistics",
+    "weather and climate",
+    "oceans and rivers",
+    "energy and power",
+    "printing and publishing",
+    "espionage and secrecy",
+    "urban planning",
+    "chemistry in everyday objects",
+    "timekeeping and calendars",
+    "death and burial customs",
+    "childhood and play",
+    "waste, ruins and what gets left behind",
+    "borders and territory",
+    "money, counting and record-keeping",
+]
+
+# One of these per call, to shift the register as well as the subject. Without
+# it every hand comes back pitched the same way — all "surprising fact about an
+# animal", regardless of which domains were named.
+_ANGLES = [
+    "Favour the very small and specific over the sweeping.",
+    "Favour something ancient that still shapes the present.",
+    "Favour a person whose name has been forgotten.",
+    "Favour a thing that turned out to work completely differently than assumed.",
+    "Favour an ordinary object with a strange history.",
+    "Favour a decision that could easily have gone the other way.",
+    "Favour a place rather than a discovery.",
+    "Favour something that was normal once and is unthinkable now.",
+    "Favour a mistake, a failure, or a dead end that mattered.",
+    "Favour a question nobody has settled yet.",
+]
+
+# The chestnuts. Every model reaches for these unprompted, they are on every
+# listicle, and a reader who has met one before reads the whole app as generic.
+_OVERUSED = (
+    "octopuses having three hearts, honey never spoiling, bananas being berries, "
+    "sharks being older than trees, Cleopatra and the pyramids, the Great Wall being "
+    "visible from space, the human body replacing all its cells, Napoleon's height, "
+    "Vikings and horned helmets, and glass being a slow-flowing liquid"
+)
+
+
+def seeds(count: int, exclude: list[str], rng=None) -> tuple[str, str]:
+    """Doors for the home screen.
+
+    `rng` exists for the tests — pass a seeded random.Random to make the domain
+    and angle draw reproducible. Production passes nothing and gets a fresh
+    draw per call, which is the entire point of this function.
+    """
+    rng = rng or random
+    picked = rng.sample(_DOMAINS, min(count, len(_DOMAINS)))
+    angle = rng.choice(_ANGLES)
+
     system = (
         PERSONA
-        + f" Produce {count} irresistible entry points into knowledge, each from a very different "
-        "domain (e.g. science, history, art, technology, everyday life). "
+        + f" Produce {count} irresistible entry points into knowledge. "
+        + "Take one from each of these domains, in order, and do not stray outside them: "
+        + "; ".join(picked)
+        + ". "
+        + angle
+        + " Each door must be specific enough to be a real subject, not a category — "
+        "'The clock that runs on melting ice' works, 'Interesting facts about clocks' does not. "
+        f"Never use the overused stock trivia: {_OVERUSED}. "
         + ("Avoid anything close to the excluded list. " if exclude else "")
         + _JSON_RULE
         + '{"seeds":[{"label": short enticing text max 8 words, "type": "fact"|"question"|"topic"}]}'
@@ -120,6 +215,7 @@ def email_doors(topics: list[str], wildcard: bool, thread: str | None, count: in
             if wildcard
             else ""
         )
+        + f"Never use the overused stock trivia: {_OVERUSED}. "
         + _JSON_RULE
         + '{"seeds":[{"label": short enticing text max 8 words, "type": "fact"|"question"|"topic"}]}'
     )

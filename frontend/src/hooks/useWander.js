@@ -13,6 +13,25 @@ import { SEED_POOL, pickSeeds } from '../seedPool.js';
 // signed-out visitor.
 // ─────────────────────────────────────────────────────────────
 
+// Restock the pool once fewer than this many never-dealt doors remain. Set so
+// a refill is in flight well before the user can reach the end of the pool by
+// shuffling — the deal is always instant, so a late refill shows up as repeats
+// rather than as waiting.
+const REFILL_BELOW = 16;
+
+// Also restock every N shuffles regardless of how much pool is left.
+//
+// Without this the static pool is large enough to cover ~19 shuffles before the
+// low-water mark trips, so a curious session sees nothing but the shipped list
+// — which is exactly the "this feels hard coded" complaint, and it would be
+// correct. One call per five shuffles keeps genuinely new doors trickling in
+// while staying far inside the daily generation cap.
+const REFILL_EVERY = 5;
+
+// How much history to send as the exclude list. The backend caps this anyway;
+// sending the whole session would just be trimmed server-side.
+const RECENT_EXCLUDE = 30;
+
 // Persistence never breaks the wander. It only ever leaves a note.
 function shrug(what, e) {
   console.warn(`[curio] ${what} didn't persist:`, e && e.message ? e.message : e);
@@ -38,8 +57,10 @@ export function useWander(user) {
   const reqId = useRef(0); // ignore stale in-flight responses
   const didInit = useRef(false); // StrictMode double-mount guard
   const poolRef = useRef([...SEED_POOL]); // grows as the backend restocks it
-  const seenRef = useRef(new Set()); // doors already dealt this session
+  const seenRef = useRef(new Set()); // doors dealt in the current pass through the pool
+  const dealtRef = useRef(new Set()); // every door dealt this session — never reset
   const refillingRef = useRef(false); // one restock call at a time
+  const shufflesRef = useRef(0); // drives the periodic restock
   const idRef = useRef(0); // unique ids for tree nodes
   const visitedRef = useRef([]); // every page opened this wander, with parent links — the tree
   const seedsRef = useRef(seeds); // seeds read from inside async callbacks
@@ -196,21 +217,38 @@ export function useWander(user) {
     try {
       const onScreen = seedsRef.current.map((s) => s.label);
       const j = await api.generateSeeds({ count: 4, exclude: onScreen });
-      if (j.seeds && j.seeds.length === 4) {
+      // Take whatever came back rather than insisting on exactly 4. Free models
+      // miscount constantly, and demanding 4 meant a perfectly good hand of 3
+      // was thrown away — leaving the static pool on screen and making the app
+      // look like it never generates anything.
+      if (j.seeds && j.seeds.length) {
         addToPool(j.seeds);
-        setSeeds(j.seeds); // fresh doors, fades in
+        const hand = j.seeds.slice(0, 4);
+        if (hand.length < 4) {
+          hand.push(...pickSeeds(4 - hand.length, hand.map((s) => s.label), poolRef.current));
+        }
+        for (const s of hand) dealtRef.current.add(s.label);
+        setSeeds(hand); // fresh doors, fades in
       }
     } catch {
       /* keep pool seeds */
     }
   }
 
-  // Quietly restock the pool with novel doors when the unseen supply runs low.
-  async function maybeRefillPool() {
-    const unseen = poolRef.current.filter((s) => !seenRef.current.has(s.label));
-    if (unseen.length >= 8 || refillingRef.current) return;
+  // Quietly restock the pool with novel doors when the supply the user has
+  // never been dealt runs low.
+  //
+  // The count is taken against dealtRef, not seenRef. seenRef gets reset every
+  // time the pool wraps, and refilling off it meant that after the first wrap
+  // the app believed it had a full pool of unseen doors forever — so it stopped
+  // asking the backend for new ones entirely, and the home screen became the
+  // static list on a loop. That is the bug behind "it feels hard coded".
+  async function maybeRefillPool(force = false) {
+    if (refillingRef.current) return;
+    const novel = poolRef.current.filter((s) => !dealtRef.current.has(s.label));
+    if (!force && novel.length >= REFILL_BELOW) return;
     refillingRef.current = true;
-    const recent = [...seenRef.current].slice(-20);
+    const recent = [...dealtRef.current].slice(-RECENT_EXCLUDE);
     try {
       const j = await api.generateSeeds({ count: 6, exclude: recent });
       if (j.seeds && j.seeds.length) addToPool(j.seeds);
@@ -225,7 +263,10 @@ export function useWander(user) {
     // Instant: deal 4 unseen doors. If the session has exhausted the pool,
     // recycle the oldest rather than ever making the user wait.
     setSeeds((currentSeeds) => {
-      for (const s of currentSeeds) seenRef.current.add(s.label);
+      for (const s of currentSeeds) {
+        seenRef.current.add(s.label);
+        dealtRef.current.add(s.label);
+      }
       const onScreen = currentSeeds.map((s) => s.label);
       let fresh = pickSeeds(
         4,
@@ -239,9 +280,11 @@ export function useWander(user) {
           ...pickSeeds(4 - fresh.length, [...onScreen, ...fresh.map((s) => s.label)], poolRef.current),
         ];
       }
+      for (const s of fresh) dealtRef.current.add(s.label);
       return fresh;
     });
-    maybeRefillPool();
+    shufflesRef.current += 1;
+    maybeRefillPool(shufflesRef.current % REFILL_EVERY === 0);
   }
 
   // ── the core tap ───────────────────────────────────────────

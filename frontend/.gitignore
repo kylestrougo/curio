@@ -1,5 +1,12 @@
 node_modules
-dist
 .vite
 *.local
 .DS_Store
+
+# dist/ is deliberately NOT ignored — it is committed and served by Flask.
+# The Pi has 1GB of RAM and no Node, so it never runs the build; see DEPLOY.md §3.
+#
+# It used to be listed here while its files were force-added, which meant a
+# rebuild produced a new content-hashed bundle that git silently refused to
+# stage. The result was an index.html referencing a script that was never
+# committed — a white screen on the Pi, and nothing in the diff to explain it.

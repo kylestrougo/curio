@@ -1,33 +1,185 @@
 // Local seed pool — home renders instantly from these; fresh doors swap in
 // quietly if the background call returns before the user starts wandering.
+//
+// Two things this list is trying to be, and both matter more than its length:
+//
+// 1. NOT THE OBVIOUS ONES. Octopus hearts, honey never spoiling, bananas being
+//    berries — every model reaches for those and so does every listicle. A door
+//    only works if it's something the reader hasn't already been told twice.
+// 2. SPREAD ACROSS DOMAINS. `domain` is not decoration: pickSeeds deals one
+//    door per domain, so a hand of four can't come back as four biology facts.
+//    Four random draws from a science-heavy list regularly do exactly that,
+//    which reads as a narrow app rather than an unlucky shuffle.
+//
+// Every `fact` here is true as stated. These labels are fed back to the model
+// as the subject of a generated page, so a wrong one doesn't just sit there —
+// it becomes a whole page of confident elaboration on something false.
+
 export const SEED_POOL = [
-  { label: 'Why do we dream?', type: 'question' },
-  { label: 'The library that mapped the ancient world', type: 'topic' },
-  { label: 'Octopuses have three hearts', type: 'fact' },
-  { label: 'How does a single idea become a whole language?', type: 'question' },
-  { label: 'Honey never spoils', type: 'fact' },
-  { label: 'The sound of a dying star', type: 'topic' },
-  { label: "Why is the ocean salty but rain isn't?", type: 'question' },
-  { label: "Rome's concrete outlasted ours — why?", type: 'question' },
-  { label: 'The woman who mapped the ocean floor', type: 'topic' },
-  { label: 'Sharks are older than trees', type: 'fact' },
-  { label: 'How do cities decide where streets go?', type: 'question' },
-  { label: 'The color that used to be poisonous', type: 'topic' },
-  { label: 'Your body replaces itself — mostly', type: 'fact' },
-  { label: 'What did silence sound like before machines?', type: 'question' },
-  { label: 'The great emu war of 1932', type: 'topic' },
-  { label: "Bananas are berries; strawberries aren't", type: 'fact' },
-  { label: 'Why do we find things beautiful?', type: 'question' },
-  { label: 'The last common language of the Silk Road', type: 'topic' },
-  { label: 'Lightning strikes Earth 8 million times a day', type: 'fact' },
-  { label: 'Could you patent a color?', type: 'question' },
+  // ── space ────────────────────────────────────────────────────────────
+  { label: 'A day on Venus is longer than its year', type: 'fact', domain: 'space' },
+  { label: 'The sound of a dying star', type: 'topic', domain: 'space' },
+  { label: 'Time runs faster at your head than your feet', type: 'fact', domain: 'space' },
+  { label: 'Australia is wider than the Moon', type: 'fact', domain: 'space' },
+  { label: 'How do you weigh a planet you can never visit?', type: 'question', domain: 'space' },
+  { label: 'The women who computed the space race', type: 'topic', domain: 'space' },
+
+  // ── deep time & geology ──────────────────────────────────────────────
+  { label: 'The Sahara was green, and will be again', type: 'topic', domain: 'geology' },
+  { label: 'The eruption that cancelled a summer', type: 'topic', domain: 'geology' },
+  { label: 'Why do rivers meander instead of running straight?', type: 'question', domain: 'geology' },
+  { label: 'How do glaciers remember the weather?', type: 'question', domain: 'geology' },
+  { label: 'The woman who mapped the ocean floor', type: 'topic', domain: 'geology' },
+
+  // ── biology ──────────────────────────────────────────────────────────
+  { label: 'One species of jellyfish can age backwards', type: 'fact', domain: 'biology' },
+  { label: 'Greenland sharks live for four centuries', type: 'fact', domain: 'biology' },
+  { label: 'Venus flytraps can count to two', type: 'fact', domain: 'biology' },
+  { label: 'Why are there no green mammals?', type: 'question', domain: 'biology' },
+  { label: 'What lives on a whale that falls to the seafloor?', type: 'question', domain: 'biology' },
+  { label: 'The Soviet experiment that tamed foxes', type: 'topic', domain: 'biology' },
+  { label: 'Why is there a limit to how tall a tree can grow?', type: 'question', domain: 'biology' },
+  { label: 'Wombats produce cube-shaped droppings', type: 'fact', domain: 'biology' },
+
+  // ── the body & medicine ──────────────────────────────────────────────
+  { label: 'Why does a placebo work even when you know?', type: 'question', domain: 'body' },
+  { label: 'What is a smell, physically?', type: 'question', domain: 'body' },
+  { label: 'Why do we get goosebumps at music?', type: 'question', domain: 'body' },
+  { label: 'The Radium Girls', type: 'topic', domain: 'body' },
+  { label: 'The village built entirely for dementia', type: 'topic', domain: 'body' },
+
+  // ── language ─────────────────────────────────────────────────────────
+  { label: 'Some languages have no separate word for blue', type: 'fact', domain: 'language' },
+  { label: 'What happens to a language when it dies?', type: 'question', domain: 'language' },
+  { label: 'How did anyone learn to read hieroglyphs?', type: 'question', domain: 'language' },
+  { label: 'How does a country choose its alphabet?', type: 'question', domain: 'language' },
+  { label: 'The last common language of the Silk Road', type: 'topic', domain: 'language' },
+  { label: 'The manuscript nobody has ever read', type: 'topic', domain: 'language' },
+
+  // ── history ──────────────────────────────────────────────────────────
+  { label: 'The churches of Lalibela were carved downward', type: 'topic', domain: 'history' },
+  { label: 'The oldest surviving customer complaint is 3,700 years old', type: 'fact', domain: 'history' },
+  { label: 'The shortest war in history lasted 38 minutes', type: 'fact', domain: 'history' },
+  { label: 'The libraries of Timbuktu', type: 'topic', domain: 'history' },
+  { label: 'The Chinese admiral who reached Africa', type: 'topic', domain: 'history' },
+  { label: 'The pilgrimage that wrecked an economy', type: 'topic', domain: 'history' },
+  { label: 'The forgotten empire of Aksum', type: 'topic', domain: 'history' },
+  { label: 'The Dancing Plague of 1518', type: 'topic', domain: 'history' },
+  { label: 'The Great Emu War of 1932', type: 'topic', domain: 'history' },
+
+  // ── engineering & materials ──────────────────────────────────────────
+  { label: "Rome's concrete outlasted ours — why?", type: 'question', domain: 'engineering' },
+  { label: 'Saudi Arabia imports sand', type: 'fact', domain: 'engineering' },
+  { label: 'What makes a bridge decide to fall?', type: 'question', domain: 'engineering' },
+  { label: 'The Eiffel Tower is taller in summer', type: 'fact', domain: 'engineering' },
+  { label: 'The pigment that killed the people wearing it', type: 'topic', domain: 'engineering' },
+  { label: 'Why did we stop building with stone?', type: 'question', domain: 'engineering' },
+
+  // ── measurement & mathematics ────────────────────────────────────────
+  { label: 'Who decided how long a second is?', type: 'question', domain: 'measurement' },
+  { label: 'How do you count something you can never see?', type: 'question', domain: 'measurement' },
+  { label: 'The kilogram used to be a lump of metal in Paris', type: 'fact', domain: 'measurement' },
+  { label: 'Why do maps put north at the top?', type: 'question', domain: 'measurement' },
+  { label: 'The map projection wars', type: 'topic', domain: 'measurement' },
+
+  // ── technology ───────────────────────────────────────────────────────
+  { label: 'The first webcam watched a coffee pot', type: 'fact', domain: 'technology' },
+  { label: 'Why is the keyboard shaped like that?', type: 'question', domain: 'technology' },
+  { label: 'Wi-Fi and your microwave use the same frequency', type: 'fact', domain: 'technology' },
+  { label: 'The Antikythera mechanism', type: 'topic', domain: 'technology' },
+  { label: 'The code the enemy never broke', type: 'topic', domain: 'technology' },
+
+  // ── art & design ─────────────────────────────────────────────────────
+  { label: 'The invention of the vanishing point', type: 'topic', domain: 'art' },
+  { label: 'Why do we find some things beautiful?', type: 'question', domain: 'art' },
+  { label: 'Kintsugi: repairing a bowl so the crack shows', type: 'topic', domain: 'art' },
+  { label: 'The forger who fooled the Nazis', type: 'topic', domain: 'art' },
+  { label: 'The typeface designed to be invisible', type: 'topic', domain: 'art' },
+
+  // ── music & sound ────────────────────────────────────────────────────
+  { label: 'What did the first music sound like?', type: 'question', domain: 'sound' },
+  { label: "The world's quietest room is unbearable", type: 'fact', domain: 'sound' },
+  { label: 'Why does every culture invent lullabies?', type: 'question', domain: 'sound' },
+  { label: 'What did silence sound like before machines?', type: 'question', domain: 'sound' },
+
+  // ── money, law & institutions ────────────────────────────────────────
+  { label: 'England ran its treasury on notched sticks', type: 'fact', domain: 'institutions' },
+  { label: 'Could you patent a colour?', type: 'question', domain: 'institutions' },
+  { label: 'Who owns the deep sea?', type: 'question', domain: 'institutions' },
+  { label: 'Medieval Europe put animals on trial', type: 'fact', domain: 'institutions' },
+  { label: 'Bhutan measures Gross National Happiness', type: 'fact', domain: 'institutions' },
+  { label: 'The tulip mania that mostly did not happen', type: 'topic', domain: 'institutions' },
+
+  // ── food & agriculture ───────────────────────────────────────────────
+  { label: 'Nutmeg was once worth more than gold', type: 'fact', domain: 'food' },
+  { label: "The glass boxes that moved the world's plants", type: 'topic', domain: 'food' },
+  { label: 'The flood of molasses that killed 21 people', type: 'topic', domain: 'food' },
+  { label: 'How does a seed know which way is up?', type: 'question', domain: 'food' },
+  { label: 'The seed vault inside an Arctic mountain', type: 'topic', domain: 'food' },
+
+  // ── cities & everyday life ───────────────────────────────────────────
+  { label: 'How do cities decide where streets go?', type: 'question', domain: 'cities' },
+  { label: 'The city built on stilts in the middle of a lake', type: 'topic', domain: 'cities' },
+  { label: 'The Pentagon has twice the bathrooms it needs', type: 'fact', domain: 'cities' },
+  { label: 'Finland has more saunas than cars', type: 'fact', domain: 'cities' },
+  { label: 'A flight recorder is bright orange', type: 'fact', domain: 'cities' },
+
+  // ── mind & philosophy ────────────────────────────────────────────────
+  { label: 'Why do we dream?', type: 'question', domain: 'mind' },
+  { label: 'What did people do before boredom was invented?', type: 'question', domain: 'mind' },
+  { label: 'Who was the last person to know everything?', type: 'question', domain: 'mind' },
+  { label: 'How does one idea become an entire language?', type: 'question', domain: 'mind' },
+
+  // ── ritual & anthropology ────────────────────────────────────────────
+  { label: 'Why do we bury the dead?', type: 'question', domain: 'ritual' },
+  { label: 'How do you warn someone 10,000 years from now?', type: 'question', domain: 'ritual' },
+  { label: 'The clock built to run for ten millennia', type: 'topic', domain: 'ritual' },
+  { label: 'The stone traps visible only from the air', type: 'topic', domain: 'ritual' },
+
+  // ── navigation & exploration ─────────────────────────────────────────
+  { label: 'The Polynesian navigators who steered by swell', type: 'topic', domain: 'navigation' },
+  { label: 'The lighthouse keepers who vanished', type: 'topic', domain: 'navigation' },
+  { label: 'More people live inside this circle than outside it', type: 'fact', domain: 'navigation' },
+  { label: 'Antarctica has a fire department', type: 'fact', domain: 'navigation' },
 ];
 
+/**
+ * Deal `n` doors, preferring one per domain.
+ *
+ * Backend-generated seeds carry no domain. Those are treated as each being
+ * their own domain rather than all sharing an undefined one — otherwise a
+ * single fresh door would block every other fresh door from being dealt.
+ */
 export function pickSeeds(n = 4, exclude = [], source = SEED_POOL) {
-  const pool = source.filter((s) => !exclude.includes(s.label));
-  const out = [];
-  while (out.length < n && pool.length) {
-    out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  const excluded = new Set(exclude);
+  const pool = source.filter((s) => s && s.label && !excluded.has(s.label));
+
+  // Fisher-Yates on a copy — splice-at-random-index biases toward the tail.
+  const shuffled = [...pool];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
+
+  const out = [];
+  const usedDomains = new Set();
+  const sameDomain = [];
+
+  for (const s of shuffled) {
+    if (out.length >= n) break;
+    if (s.domain && usedDomains.has(s.domain)) {
+      sameDomain.push(s);
+      continue;
+    }
+    if (s.domain) usedDomains.add(s.domain);
+    out.push(s);
+  }
+
+  // Not enough distinct domains left to fill the hand — top up with the rest.
+  for (const s of sameDomain) {
+    if (out.length >= n) break;
+    out.push(s);
+  }
+
   return out;
 }

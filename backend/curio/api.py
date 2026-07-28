@@ -107,7 +107,11 @@ def seeds():
     data = _body()
     count = data.get("count", 4)
     count = count if isinstance(count, int) and 1 <= count <= 8 else 4
-    exclude = _clean_list(data.get("exclude"), limit=20, item_limit=160)
+    # Deliberately roomier than the other endpoints' exclude lists. This one is
+    # the only thing stopping a long session being served the same doors twice,
+    # and 20 labels stopped covering that once the client started remembering
+    # everything it had dealt.
+    exclude = _clean_list(data.get("exclude"), limit=40, item_limit=160)
 
     system, user = prompts.seeds(count, exclude)
     parsed, error = _generate(system, user, "seeds")

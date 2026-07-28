@@ -204,14 +204,31 @@ def _send(to_email: str, subject: str, text: str, html_body: str) -> bool:
     msg.add_alternative(html_body, subtype="html")
 
     try:
-        with smtplib.SMTP(cfg["SMTP_HOST"], cfg["SMTP_PORT"], timeout=30) as smtp:
-            smtp.starttls()
-            smtp.login(cfg["SMTP_USER"], cfg["SMTP_PASSWORD"])
-            smtp.send_message(msg)
+        _deliver(cfg["SMTP_HOST"], int(cfg["SMTP_PORT"]), cfg["SMTP_USER"], cfg["SMTP_PASSWORD"], msg)
         return True
     except (smtplib.SMTPException, OSError) as exc:
         log.error("failed to send to %s: %s", to_email, exc)
         return False
+
+
+def _deliver(host: str, port: int, user: str, password: str, msg) -> None:
+    """Send over whichever transport the port implies.
+
+    Gmail offers both, and they are not interchangeable: 465 expects TLS from
+    the first byte, while 587 opens in clear text and upgrades via STARTTLS.
+    Calling starttls() on 465 hangs until the timeout; connecting plain to 587
+    and skipping the upgrade would send the app password in the clear. Choosing
+    off the port means a config that works elsewhere works here unchanged.
+    """
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(msg)
+        return
+    with smtplib.SMTP(host, port, timeout=30) as smtp:
+        smtp.starttls()
+        smtp.login(user, password)
+        smtp.send_message(msg)
 
 
 def _is_due(prefs, now: datetime) -> bool:

@@ -109,8 +109,16 @@ sudo -n true 2>/dev/null && say OK "passwordless sudo" \
   || say INFO "sudo needs a password — run the systemd steps yourself"
 
 echo "──────── existing curio ────────"
+# A bare checkout is expected — you just cloned it. Only a previous *install*
+# (a venv, or a live database) means this run is an upgrade rather than a fresh
+# deploy, so only that is worth flagging.
 for d in "$HOME/curio" /opt/curio /srv/curio; do
-  [ -d "$d" ] && say WARN "already exists: $d"
+  [ -d "$d" ] || continue
+  if [ -d "$d/backend/.venv" ] || ls "$d"/backend/*.db >/dev/null 2>&1; then
+    say WARN "existing install at $d (venv or database present) — this is an upgrade"
+  else
+    say OK "checkout at $d, not yet installed"
+  fi
 done
 
 echo

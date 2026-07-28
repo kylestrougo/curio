@@ -31,13 +31,21 @@ The database is created automatically on first boot. To do it by hand:
 
 ## 3. Frontend
 
-Building Vite on a Pi 3 is slow but works. Building on your laptop and copying
-`frontend/dist/` across is faster.
+**`frontend/dist/` is committed, so there is nothing to do here.** It is the
+one build artifact in the repo, and deliberately so: a Pi 3 with ~250MB free
+runs Rollup into swap and thrashes the SD card for several minutes, and `npm
+ci` would drop ~200MB of `node_modules` on the same card to produce a 204KB
+result. The output is plain JS and CSS with no native code, so a build on any
+machine is byte-identical in effect — architecture does not enter into it.
+
+Rebuild it (on a real computer, not the Pi) whenever frontend source changes,
+and commit the result:
 
 ```bash
-cd /home/pi/curio/frontend
+cd frontend
 npm ci
-npm run build     # → frontend/dist
+npm run build          # → frontend/dist
+git add -f dist        # -f: dist is gitignored by default
 ```
 
 Point `CURIO_STATIC_DIR` at that `dist` directory. Flask serves it directly, so

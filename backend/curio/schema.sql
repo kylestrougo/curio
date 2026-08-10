@@ -57,11 +57,15 @@ CREATE TABLE IF NOT EXISTS email_prefs (
     enabled     INTEGER NOT NULL DEFAULT 0,
     topics_json TEXT    NOT NULL DEFAULT '[]',
     wildcard    INTEGER NOT NULL DEFAULT 1,
-    send_hour   INTEGER NOT NULL DEFAULT 8,       -- local hour, 0-23
+    send_hour   INTEGER NOT NULL DEFAULT 8,       -- hour 0-23 on the user's own clock
     frequency   TEXT    NOT NULL DEFAULT 'daily'
                 CHECK (frequency IN ('daily', 'weekdays', 'weekly')),
     unsub_token TEXT    NOT NULL UNIQUE,
-    last_sent_on TEXT                              -- date only; the send-once-a-day guard
+    last_sent_on TEXT,                             -- LOCAL date only; the send-once-a-day guard
+    -- IANA zone captured from the browser on settings save ('' = unknown,
+    -- fall back to CURIO_DEFAULT_TZ). Without this, send_hour was compared
+    -- against the UTC clock and "send around 11pm" meant 7pm in New York.
+    timezone    TEXT    NOT NULL DEFAULT ''
 );
 
 -- Deep links from the daily email. The token is opaque so an email address

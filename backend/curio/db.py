@@ -30,9 +30,26 @@ def close_db(_e=None) -> None:
         db.close()
 
 
+def _ensure_column(db: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    """Add a column to an existing table if it is missing.
+
+    schema.sql is all CREATE TABLE IF NOT EXISTS, which does nothing for a
+    database that already exists — so a column added there never reaches a
+    deployed Pi. This is the project's whole migration story: one guarded
+    ALTER per added column, run at every boot, idempotent. If the migrations
+    ever get more interesting than adding columns, that is the moment to adopt
+    a real tool rather than grow this.
+    """
+    have = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in have:
+        db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def init_db() -> None:
     db = get_db()
     db.executescript(SCHEMA_PATH.read_text())
+    # Columns added after first deploy (see _ensure_column):
+    _ensure_column(db, "email_prefs", "timezone", "TEXT NOT NULL DEFAULT ''")
     db.commit()
 
 

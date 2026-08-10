@@ -205,7 +205,8 @@ export function getEmailPrefs() {
   return request('/api/email-prefs');
 }
 
-// prefs: {enabled, topics: [], wildcard, sendHour, frequency}
+// prefs: {enabled, topics: [], wildcard, sendHour, frequency, timezone}
+// timezone is the browser's IANA zone — sendHour is on the user's clock.
 export function putEmailPrefs(p) {
   return request('/api/email-prefs', { method: 'PUT', body: p });
 }

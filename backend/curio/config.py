@@ -93,6 +93,10 @@ class Config:
     MAIL_FROM_NAME = os.environ.get("CURIO_MAIL_FROM_NAME", "Curio")
     # Dry-run prints the email to the log instead of sending. Handy on first deploy.
     MAIL_DRY_RUN = _bool("CURIO_MAIL_DRY_RUN", False)
+    # Fallback timezone for "send around": rows saved before timezones existed
+    # (and browsers that won't say) carry '' and get this instead. Set it to
+    # where your users actually are — America/New_York on the original Pi.
+    DEFAULT_TZ = os.environ.get("CURIO_DEFAULT_TZ", "UTC")
 
     # The single admin. First account created with this email is promoted.
     ADMIN_EMAIL = os.environ.get("CURIO_ADMIN_EMAIL", "")

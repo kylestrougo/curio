@@ -112,8 +112,11 @@ mkdir -p /home/io/curio/logs /home/io/curio/backups
 crontab -e   # paste from deploy/crontab.example
 ```
 
-The email job runs hourly and decides for itself who is due — that's how a user
-who picked 07:00 gets it at 07:00 while nobody receives two in a day.
+The email job runs hourly and decides for itself who is due — a user who picked
+07:00 gets it at 07:00 **on their own clock** (the browser reports a timezone
+when settings are saved), and nobody receives two in a day. Rows saved before
+timezones existed fall back to `CURIO_DEFAULT_TZ` — set it in `.env`
+(`America/New_York` on the original Pi) or those users stay on UTC hours.
 
 ## 7. First run
 

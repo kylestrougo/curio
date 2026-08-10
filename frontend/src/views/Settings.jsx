@@ -16,6 +16,17 @@ function hourLabel(h) {
   return `${String(h).padStart(2, '0')}:00 — ${twelve}${suffix}`;
 }
 
+// The browser's IANA timezone, so "send around 11pm" means the user's 11pm.
+// Sent silently with every save; the server validates and falls back to its
+// configured default when this comes back empty.
+function browserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch {
+    return '';
+  }
+}
+
 export default function Settings({ onDone }) {
   const [prefs, setPrefs] = useState(null);
   const [topicsText, setTopicsText] = useState('');
@@ -62,6 +73,7 @@ export default function Settings({ onDone }) {
       wildcard: !!prefs.wildcard,
       sendHour: Number(prefs.sendHour),
       frequency: prefs.frequency,
+      timezone: browserTimezone(),
     };
     try {
       const r = await api.putEmailPrefs(body);
@@ -158,6 +170,7 @@ export default function Settings({ onDone }) {
               </option>
             ))}
           </select>
+          {browserTimezone() && <p className="fhelp">In your local time ({browserTimezone()}).</p>}
         </div>
         <div className="field">
           <label className="flabel" htmlFor="curio-freq">

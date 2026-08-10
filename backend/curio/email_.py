@@ -21,6 +21,7 @@ import smtplib
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, current_app, jsonify, redirect, request
 from flask_login import current_user, login_required
@@ -33,6 +34,44 @@ log = logging.getLogger(__name__)
 bp = Blueprint("email", __name__)
 
 FREQUENCIES = {"daily", "weekdays", "weekly"}
+
+
+# ── time, on the user's clock ───────────────────────────────────────────
+#
+# "Send around 11pm" has to mean the user's 11pm. The scheduling gate used to
+# compare send_hour against the UTC clock, which delivered a New York user's
+# 11pm email at 7pm all summer. The browser now reports an IANA zone on
+# settings save; everything schedule-shaped below runs on that clock — the
+# hour, the weekday, AND the date written to last_sent_on. The date matters
+# as much as the hour: 23:00 in New York is 03:00 *tomorrow* in UTC, so a
+# UTC-dated guard would mark the wrong day sent and allow a duplicate.
+
+
+def _valid_tz(name) -> str:
+    """The IANA name if the zone database knows it, else ''."""
+    if not isinstance(name, str) or not name or len(name) > 64:
+        return ""
+    try:
+        ZoneInfo(name)
+    except Exception:
+        return ""
+    return name
+
+
+def _user_tz(prefs) -> ZoneInfo:
+    """The user's zone, then the configured default, then UTC.
+
+    The double fallback is deliberate: a typo in CURIO_DEFAULT_TZ must degrade
+    to UTC scheduling, not kill the entire hourly cron run for every user.
+    """
+    for name in (prefs["timezone"], current_app.config["DEFAULT_TZ"]):
+        if _valid_tz(name):
+            return ZoneInfo(name)
+    return ZoneInfo("UTC")
+
+
+def _local_now(prefs, now: datetime) -> datetime:
+    return now.astimezone(_user_tz(prefs))
 
 
 # ── preferences ─────────────────────────────────────────────────────────
@@ -60,6 +99,7 @@ def _prefs_json(row) -> dict:
         "wildcard": bool(row["wildcard"]),
         "sendHour": row["send_hour"],
         "frequency": row["frequency"],
+        "timezone": row["timezone"],
         "lastSentOn": row["last_sent_on"],
     }
 
@@ -88,15 +128,20 @@ def put_prefs():
     frequency = data.get("frequency", "daily")
     frequency = frequency if frequency in FREQUENCIES else "daily"
 
+    # Clamp-don't-reject, like sendHour: an unknown zone stores '' and the
+    # server default applies. The browser sends this automatically on save.
+    tz = _valid_tz(data.get("timezone"))
+
     execute(
         "UPDATE email_prefs SET enabled = ?, topics_json = ?, wildcard = ?, "
-        "send_hour = ?, frequency = ? WHERE user_id = ?",
+        "send_hour = ?, frequency = ?, timezone = ? WHERE user_id = ?",
         (
             1 if data.get("enabled") else 0,
             json.dumps(topics),
             1 if data.get("wildcard", True) else 0,
             hour,
             frequency,
+            tz,
             current_user.id,
         ),
     )
@@ -231,16 +276,27 @@ def _deliver(host: str, port: int, user: str, password: str, msg) -> None:
         smtp.send_message(msg)
 
 
-def _is_due(prefs, now: datetime) -> bool:
-    """Frequency + hour gate, plus a send-once-per-day guard."""
-    today = now.strftime("%Y-%m-%d")
+def _is_due(prefs, local_now: datetime) -> bool:
+    """Frequency + hour gate, plus a send-once-per-day guard.
+
+    Takes the *already localized* time — every check here (date, hour,
+    weekday) must read the same clock, so localization happens once in the
+    caller rather than piecemeal here.
+
+    The hour gate is >= on purpose: the cron is hourly, and "at or after"
+    means a missed run delays the email an hour instead of dropping the day.
+    That same catch-up covers DST's missing spring-forward hour — a 2am
+    send_hour on the day 2am doesn't exist goes out at 3. The repeated
+    fall-back hour can't double-send; last_sent_on already guards it.
+    """
+    today = local_now.strftime("%Y-%m-%d")
     if prefs["last_sent_on"] == today:
         return False
-    if now.hour < prefs["send_hour"]:
+    if local_now.hour < prefs["send_hour"]:
         return False
 
     freq = prefs["frequency"]
-    weekday = now.weekday()  # Mon=0
+    weekday = local_now.weekday()  # Mon=0
     if freq == "weekdays" and weekday > 4:
         return False
     if freq == "weekly" and weekday != 0:
@@ -275,7 +331,8 @@ def send_due_emails(force_user_id: int | None = None) -> dict:
 
     sent = skipped = failed = 0
     for prefs in rows:
-        if force_user_id is None and not _is_due(prefs, now):
+        local_now = _local_now(prefs, now)
+        if force_user_id is None and not _is_due(prefs, local_now):
             skipped += 1
             continue
 
@@ -312,9 +369,10 @@ def send_due_emails(force_user_id: int | None = None) -> dict:
 
         text, html_body = _render(prefs["email"], doors, prefs["unsub_token"])
         if _send(prefs["email"], "Doors for today", text, html_body):
+            # The user's date, not UTC's — see the block comment up top.
             execute(
                 "UPDATE email_prefs SET last_sent_on = ? WHERE user_id = ?",
-                (now.strftime("%Y-%m-%d"), prefs["user_id"]),
+                (local_now.strftime("%Y-%m-%d"), prefs["user_id"]),
             )
             sent += 1
         else:

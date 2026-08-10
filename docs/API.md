@@ -154,10 +154,14 @@ quietly, and never counts days or breaks streaks.
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/email-prefs` | → prefs for current user |
-| `PUT` | `/api/email-prefs` | `{enabled, topics: [], wildcard, sendHour, frequency}` |
+| `PUT` | `/api/email-prefs` | `{enabled, topics: [], wildcard, sendHour, frequency, timezone}` |
 | `GET` | `/unsub/:token` | one-click, no login, honored instantly |
 | `GET` | `/d/:token` | deep link from an email — redirects to `/?door=:token` |
 | `GET` | `/api/door/:token` | exchanges that token for `{label, type}` so the client can open the page |
 
 `frequency` is `daily` | `weekdays` | `weekly`. Users who configure nothing get
 nothing. No open tracking, no re-engagement copy, no escalating frequency.
+
+`timezone` is the browser's IANA zone (e.g. `America/New_York`), sent silently
+on save; `sendHour` is interpreted on that clock. Unknown zones store `''` and
+fall back to the server's `CURIO_DEFAULT_TZ`.

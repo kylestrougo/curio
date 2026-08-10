@@ -10,3 +10,7 @@
 -r requirements.txt
 
 pytest==9.1.1
+# Timezone database, for environments without the system one (the Pi and any
+# Debian box have it; slim CI containers sometimes don't). zoneinfo prefers
+# the system copy and only falls back to this package.
+tzdata==2025.2

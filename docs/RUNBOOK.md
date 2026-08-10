@@ -40,6 +40,10 @@ free catalogue retires models without notice.
 
 **No email arrived.** Check in this order: the user has preferences saved at
 all, `CURIO_MAIL_DRY_RUN=0`, then the log.
+"Send around" runs on each user's own clock (browser-reported timezone,
+`CURIO_DEFAULT_TZ` as the fallback) — an email that arrives hours off means
+the user's stored timezone is empty and the default is wrong for them; they
+can fix it by simply re-saving Settings.
 ```bash
 tail -20 ~/curio/logs/email.log
 .venv/bin/flask send-due-emails --user-id 1   # ignores the schedule

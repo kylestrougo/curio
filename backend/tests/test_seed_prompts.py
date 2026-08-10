@@ -53,7 +53,7 @@ class TestSeedPromptQualityRules:
 
     def test_demands_subjects_not_categories(self):
         system, _ = prompts.seeds(4, [])
-        assert "not a category" in system
+        assert "not to be a category" in system
 
     def test_exclude_list_is_carried_into_the_user_message(self):
         _, user = prompts.seeds(4, ["Why do we dream?", "The Radium Girls"])
@@ -68,3 +68,32 @@ class TestSeedPromptQualityRules:
         system, _ = prompts.seeds(4, [])
         assert "ONLY JSON" in system
         assert '"seeds"' in system
+
+
+class TestAntiFabrication:
+    """Every prompt inherits the no-invention clause; the risky ones add more.
+
+    These pin wording deliberately: the counterweight to 'vivid, surprising,
+    obscure' is these exact clauses, and losing one in a rewrite should fail
+    a test, not a user."""
+
+    def test_persona_forbids_invention(self):
+        assert "Never invent names, dates, numbers" in prompts.PERSONA
+        assert "certain is real" in prompts.PERSONA
+
+    def test_ask_admits_uncertainty_rather_than_guessing(self):
+        system, _ = prompts.ask("T", "said", "q?")
+        assert "say so plainly instead of guessing" in system
+
+    def test_seeds_require_real_subjects(self):
+        system, _ = prompts.seeds(4, [])
+        assert "real, verifiable subject" in system
+
+    def test_email_doors_require_real_subjects(self):
+        system, _ = prompts.email_doors(["history"], False, None)
+        assert "real, verifiable subject" in system
+
+    def test_risky_angles_were_tempered(self):
+        joined = " ".join(prompts._ANGLES)
+        assert "a person whose name has been forgotten" not in joined
+        assert "real, documented person" in joined

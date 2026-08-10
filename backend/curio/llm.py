@@ -31,6 +31,32 @@ CONFIG_KEY_OVERRIDES = "model_overrides"
 # A model gets this many parse attempts before we give up on it and move on.
 PARSE_ATTEMPTS_PER_MODEL = 2
 
+# Sampling temperature by intent. Before this table existed the request sent
+# no temperature at all, so every free model ran at its own default — often
+# around 1.0, which on small models is where invented events and terminology
+# come from. Temperature is a variance dial, not a truth dial (a model can
+# hallucinate at 0), so this works alongside the anti-fabrication clauses in
+# prompts.py, not instead of them.
+#
+# Low for anything presented as fact; high where the whole point is variety.
+# bench/admin_test mirror `page` so benchmarks measure what production runs.
+INTENT_TEMPERATURE = {
+    "page": 0.4,
+    "more": 0.4,
+    "ask": 0.3,
+    "recap": 0.4,
+    "seeds": 0.9,
+    "email": 0.85,
+    "topical_seeds": 0.9,
+    "bench": 0.4,
+    "admin_test": 0.4,
+}
+
+
+def _temperature_for(intent: str) -> float | None:
+    """None means: send no temperature field, let the provider default stand."""
+    return INTENT_TEMPERATURE.get(intent)
+
 
 class LLMError(RuntimeError):
     """Every model in the chain failed."""
@@ -157,7 +183,14 @@ def _record(model: str, intent: str, ok: bool, latency_ms: int | None, error: st
 # ── the call ────────────────────────────────────────────────────────────
 
 
-def _post(model: str, system: str, user: str, max_tokens: int, json_mode: bool) -> str:
+def _post(
+    model: str,
+    system: str,
+    user: str,
+    max_tokens: int,
+    json_mode: bool,
+    temperature: float | None = None,
+) -> str:
     cfg = current_app.config
     key = cfg["OPENROUTER_API_KEY"]
     if not key:
@@ -171,6 +204,8 @@ def _post(model: str, system: str, user: str, max_tokens: int, json_mode: bool) 
             {"role": "user", "content": user},
         ],
     }
+    if temperature is not None:
+        body["temperature"] = temperature
     if json_mode:
         # Sent when we think the model supports it — but never relied upon.
         body["response_format"] = {"type": "json_object"}
@@ -215,12 +250,16 @@ def generate(
     if not chain:
         raise LLMError("no models configured")
 
+    temperature = _temperature_for(intent)
     last_error = "no models attempted"
     for model in chain:
         for attempt in range(PARSE_ATTEMPTS_PER_MODEL):
             started = time.monotonic()
             try:
-                raw = _post(model, system, user, max_tokens, json_mode=(attempt == 0))
+                raw = _post(
+                    model, system, user, max_tokens,
+                    json_mode=(attempt == 0), temperature=temperature,
+                )
             except (LLMError, requests.RequestException) as exc:
                 elapsed = int((time.monotonic() - started) * 1000)
                 last_error = f"{type(exc).__name__}: {exc}"
@@ -256,7 +295,10 @@ def generate_raw(
     """
     started = time.monotonic()
     try:
-        raw = _post(model, system, user, max_tokens, json_mode=True)
+        raw = _post(
+            model, system, user, max_tokens,
+            json_mode=True, temperature=_temperature_for(intent),
+        )
     except (LLMError, requests.RequestException) as exc:
         elapsed = int((time.monotonic() - started) * 1000)
         _record(model, intent, False, elapsed, str(exc))

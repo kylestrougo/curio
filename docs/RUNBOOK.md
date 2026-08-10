@@ -38,6 +38,13 @@ free catalogue retires models without notice.
 .venv/bin/flask refresh-chain --force         # adopt the fastest survivors
 ```
 
+**Pages read confidently wrong** (invented events, made-up terminology).
+Generation runs at a low temperature and the prompts forbid invention, but
+those only narrow the odds — the model itself is the biggest lever. Run
+`bench-models`, read a few pages from each survivor by hand via the /admin
+test button, and pin the strongest as the `page` override in /admin config.
+The rest of the chain still backs it up if it goes down.
+
 **No email arrived.** Check in this order: the user has preferences saved at
 all, `CURIO_MAIL_DRY_RUN=0`, then the log.
 "Send around" runs on each user's own clock (browser-reported timezone,

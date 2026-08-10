@@ -217,6 +217,17 @@ class TestAdmin:
         r = admin.put("/api/admin/config", json={"overrides": {"seeds": "cheap:free", "bogus": "x"}})
         assert r.get_json()["overrides"] == {"seeds": "cheap:free"}
 
+    def test_email_override_round_trips(self, admin):
+        # Was silently dropped: 'email' wasn't in TEST_INTENTS, which doubles
+        # as the override allow-list, so the UI showed a save that reverted.
+        r = admin.put("/api/admin/config", json={"overrides": {"email": "strong:free"}})
+        assert r.get_json()["overrides"] == {"email": "strong:free"}
+
+    def test_admin_test_exercises_the_email_prompt(self, admin, stub_llm):
+        r = admin.post("/api/admin/test", json={"model": "m:free", "intent": "email"})
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
+
 
 class TestEmailPrefs:
     def test_default_is_off(self, signed_in):

@@ -14,7 +14,12 @@ import random
 PERSONA = (
     "You are Curio, the knowledge engine behind a curiosity app. The user explores by tapping. "
     "You are accurate and never invent facts. You write for a curious, intelligent adult and prize "
-    "the genuinely fascinating over the obvious."
+    "the genuinely fascinating over the obvious. "
+    # Everything else in these prompts pushes toward the vivid and obscure —
+    # which is exactly where small models start confabulating. This is the
+    # counterweight; keep it short and absolute.
+    "Never invent names, dates, numbers, quotations, events, or technical terms. "
+    "When unsure of a specific detail, use one you are certain is real."
 )
 
 # Free models have poor JSON discipline. We ask for bare JSON, send
@@ -88,9 +93,9 @@ _DOMAINS = [
 _ANGLES = [
     "Favour the very small and specific over the sweeping.",
     "Favour something ancient that still shapes the present.",
-    "Favour a person whose name has been forgotten.",
+    "Favour a real, documented person history has largely forgotten.",
     "Favour a thing that turned out to work completely differently than assumed.",
-    "Favour an ordinary object with a strange history.",
+    "Favour an ordinary object with a strange, true history.",
     "Favour a decision that could easily have gone the other way.",
     "Favour a place rather than a discovery.",
     "Favour something that was normal once and is unthinkable now.",
@@ -126,8 +131,9 @@ def seeds(count: int, exclude: list[str], rng=None) -> tuple[str, str]:
         + "; ".join(picked)
         + ". "
         + angle
-        + " Each door must be specific enough to be a real subject, not a category — "
-        "'The clock that runs on melting ice' works, 'Interesting facts about clocks' does not. "
+        + " Each door must name a real, verifiable subject, specific enough not to be a category — "
+        "'The clock that runs on melting ice' works, 'Interesting facts about clocks' does not, "
+        "and nothing invented ever does. "
         f"Never use the overused stock trivia: {_OVERUSED}. "
         + ("Avoid anything close to the excluded list. " if exclude else "")
         + _JSON_RULE
@@ -183,7 +189,8 @@ def ask(title: str, said: str, question: str) -> tuple[str, str]:
     system = (
         PERSONA + " " + _JSON_RULE
         + '{"answer": "2-4 clear accurate sentences"}. '
-        "Answer the user's follow-up question in the context of the page."
+        "Answer the user's follow-up question in the context of the page. "
+        "If you do not know, say so plainly instead of guessing."
     )
     return system, f'Page: "{title}".\nPage says: {said}\nFollow-up question: {question}'
 
@@ -216,6 +223,7 @@ def email_doors(topics: list[str], wildcard: bool, thread: str | None, count: in
             else ""
         )
         + f"Never use the overused stock trivia: {_OVERUSED}. "
+        + "Every door must name a real, verifiable subject. "
         + _JSON_RULE
         + '{"seeds":[{"label": short enticing text max 8 words, "type": "fact"|"question"|"topic"}]}'
     )

@@ -57,7 +57,7 @@ class TestFallbackChain:
         """responses: list of (raw_or_exception) consumed per _post call."""
         calls = []
 
-        def fake_post(model, system, user, max_tokens, json_mode):
+        def fake_post(model, system, user, max_tokens, json_mode, temperature=None):
             calls.append(model)
             item = responses.pop(0)
             if isinstance(item, Exception):
@@ -130,3 +130,58 @@ class TestChainConfig:
             llm.set_config_json(llm.CONFIG_KEY_OVERRIDES, {"seeds": "b"})
             assert llm.chain_for("seeds") == ["b", "a"]
             assert llm.chain_for("page") == ["a", "b"]
+
+
+class TestTemperature:
+    """The request must carry a temperature suited to the intent.
+
+    Before this, no temperature was sent at all — every free model ran at its
+    own default, and small models at ~1.0 are where invented events come from.
+    """
+
+    def _capture(self, app, monkeypatch):
+        bodies = []
+
+        class FakeRes:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return {"choices": [{"message": {"content": '{"ok": true}'}}]}
+
+        def fake_request_post(url, headers=None, json=None, timeout=None):
+            bodies.append(json)
+            return FakeRes()
+
+        monkeypatch.setattr(llm.requests, "post", fake_request_post)
+        return bodies
+
+    def test_factual_intents_run_cool(self, app, monkeypatch):
+        bodies = self._capture(app, monkeypatch)
+        with app.app_context():
+            llm.generate("s", "u", intent="page", models=["a"])
+            llm.generate("s", "u", intent="ask", models=["a"])
+        assert bodies[0]["temperature"] == 0.4
+        assert bodies[1]["temperature"] == 0.3
+
+    def test_variety_intents_run_hot(self, app, monkeypatch):
+        bodies = self._capture(app, monkeypatch)
+        with app.app_context():
+            llm.generate("s", "u", intent="seeds", models=["a"])
+        assert bodies[0]["temperature"] == 0.9
+
+    def test_unknown_intent_sends_no_temperature(self, app, monkeypatch):
+        bodies = self._capture(app, monkeypatch)
+        with app.app_context():
+            llm.generate("s", "u", intent="generic", models=["a"])
+        assert "temperature" not in bodies[0]
+
+    def test_benchmarks_measure_what_production_runs(self, app, monkeypatch):
+        # bench and admin_test mirror the page temperature; a benchmark run at
+        # a different temperature vets a model Curio never actually runs.
+        assert llm._temperature_for("bench") == llm._temperature_for("page")
+        assert llm._temperature_for("admin_test") == llm._temperature_for("page")
+        bodies = self._capture(app, monkeypatch)
+        with app.app_context():
+            llm.generate_raw("a", "s", "u", intent="bench")
+        assert bodies[0]["temperature"] == llm.INTENT_TEMPERATURE["page"]

@@ -36,6 +36,10 @@ TEST_INTENTS = {
         "Why do we dream?", "Dreams occur mostly in REM sleep.", "Do animals dream too?"
     ),
     "recap": lambda: prompts.recap(["Sleep", "REM", "Lucid dreaming"]),
+    # email was missing here, which had a sneaky side effect: this dict doubles
+    # as the allow-list for per-intent overrides, so an email override saved
+    # from /admin was silently dropped while the UI appeared to accept it.
+    "email": lambda: prompts.email_doors(["astronomy", "old maps"], True, None),
 }
 
 

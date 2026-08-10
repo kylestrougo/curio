@@ -10,6 +10,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // The seed pool lives one level up in shared/ (the backend's warm-cache
+    // job reads the same file); without this the dev server refuses to serve
+    // imports from outside the frontend root. Build output is unaffected.
+    fs: { allow: ['..'] },
     proxy: {
       '/api': { target: backend, changeOrigin: false },
       '/d': { target: backend, changeOrigin: false },

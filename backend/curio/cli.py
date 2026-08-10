@@ -9,6 +9,7 @@ from __future__ import annotations
 import click
 from flask.cli import with_appcontext
 
+from . import pagecache, prompts
 from .db import execute, query
 from .email_ import send_due_emails
 from .llm import get_chain, stats_rollup
@@ -31,7 +32,11 @@ def housekeeping_command():
     counters = prune_counters(keep_days=7)
     execute("DELETE FROM model_stats WHERE created_at < datetime('now', '-30 days')")
     execute("DELETE FROM door_tokens WHERE created_at < datetime('now', '-30 days')")
-    click.echo(f"pruned {counters} rate-limit counters; stats and door tokens older than 30d removed")
+    pages = pagecache.prune()
+    click.echo(
+        f"pruned {counters} rate-limit counters and {pages} cached pages; "
+        "stats and door tokens older than 30d removed"
+    )
 
 
 @click.command("make-admin")
@@ -223,6 +228,75 @@ def refresh_chain_command(force, repeat, top, dry_run):
     click.echo(f"chain updated: {' → '.join(new)}")
 
 
+@click.command("warm-cache")
+@click.option("--limit", type=int, default=12, help="Most doors to generate in one run.")
+@with_appcontext
+def warm_cache_command(limit):
+    """Pre-generate pages for starter doors that aren't cached yet.
+
+    The starter pool in shared/seed-pool.json is what every visitor sees
+    first; generating those pages overnight means their first tap opens
+    instantly instead of waiting multi-seconds on a free model.
+
+    Sequential on purpose — parallel calls measure the free tier's rate
+    limiter, which is the reverted-prefetch stampede all over again. Runs off
+    cron, so it bypasses the per-user quota (that guards user-triggered
+    generation); the only budget spent is the shared OpenRouter key's, which
+    is why the nightly limit stays small.
+    """
+    import json as _json
+    import random as _random
+
+    from .config import BASE_DIR
+    from .llm import LLMError, generate
+
+    pool_path = BASE_DIR.parent / "shared" / "seed-pool.json"
+    try:
+        pool = _json.loads(pool_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"can't read {pool_path}: {exc}")
+
+    todo = [
+        s for s in pool
+        if isinstance(s, dict) and s.get("label")
+        and not pagecache.has_page(s["label"], s.get("type", "topic"))
+    ]
+    _random.shuffle(todo)  # spread coverage rather than always warming the top
+
+    warmed = failures = 0
+    for seed in todo[:limit]:
+        label, kind = seed["label"], seed.get("type", "topic")
+        system, user = prompts.page(label, kind, [], False, [])
+        try:
+            parsed = generate(system, user, intent="page")
+        except LLMError as exc:
+            failures += 1
+            click.echo(f"  ✗ {label} — {str(exc)[:80]}")
+            # Three straight failures means the chain is probably down;
+            # walking a dead chain for every remaining door helps nobody.
+            if failures >= 3 and warmed == 0:
+                click.echo("aborting: chain looks dead (try refresh-chain)")
+                raise SystemExit(1)
+            continue
+
+        title = (parsed.get("title") or label).strip()[:300]
+        blurb = (parsed.get("blurb") or "").strip()[:1200]
+        buttons = [
+            {"label": str(b.get("label", "")).strip()[:160],
+             "type": b.get("type") if b.get("type") in ("fact", "question", "topic") else "topic"}
+            for b in (parsed.get("buttons") or []) if isinstance(b, dict) and b.get("label")
+        ][:5]
+        if not blurb or not buttons:
+            failures += 1
+            click.echo(f"  ✗ {label} — page came back empty")
+            continue
+        pagecache.store_page(label, kind, title, blurb, buttons)
+        warmed += 1
+        click.echo(f"  ✓ {label}")
+
+    click.echo(f"warmed={warmed} failed={failures} already_cached={len(pool) - len(todo)}")
+
+
 def init_app(app) -> None:
     app.cli.add_command(send_due_emails_command)
     app.cli.add_command(housekeeping_command)
@@ -230,3 +304,4 @@ def init_app(app) -> None:
     app.cli.add_command(model_status_command)
     app.cli.add_command(bench_models_command)
     app.cli.add_command(refresh_chain_command)
+    app.cli.add_command(warm_cache_command)

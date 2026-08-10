@@ -170,7 +170,7 @@ class TestGeneration:
         signed_in.put("/api/email-prefs", json={"topics": ["deep sea biology", "old maps"]})
         prompts_seen = []
 
-        def fake_post(model, system, user, max_tokens, json_mode, temperature=None):
+        def fake_post(model, system, user, max_tokens, json_mode, temperature=None, timeout=None):
             prompts_seen.append((system, user))
             return __import__("json").dumps(
                 {"seeds": [{"label": f"near {i}", "type": "topic"} for i in range(6)]}
@@ -215,16 +215,19 @@ class TestGeneration:
         assert client.post("/api/page", json={"label": "x", "kind": "fact"}).status_code == 200
 
     def test_anonymous_daily_cap(self, client, stub_llm):
-        for _ in range(3):
-            assert client.post("/api/page", json={"label": "x", "kind": "fact"}).status_code == 200
-        r = client.post("/api/page", json={"label": "x", "kind": "fact"})
+        # Distinct labels: repeating one would hit the page cache, which is
+        # deliberately quota-free (quota counts generations, not requests).
+        for i in range(3):
+            assert client.post("/api/page", json={"label": f"x{i}", "kind": "fact"}).status_code == 200
+        r = client.post("/api/page", json={"label": "x99", "kind": "fact"})
         assert r.status_code == 429
         assert r.get_json()["error"] == "quota"
 
     def test_signed_in_users_get_the_higher_cap(self, client, stub_llm):
         client.post("/api/auth/signup", json={"email": "a@b.com", "password": "longenoughpw"})
-        for _ in range(4):  # past the anonymous cap of 3
-            assert client.post("/api/page", json={"label": "x", "kind": "fact"}).status_code == 200
+        # Distinct labels so every request is a real (counted) generation.
+        for i in range(4):  # past the anonymous cap of 3
+            assert client.post("/api/page", json={"label": f"y{i}", "kind": "fact"}).status_code == 200
 
     def test_generation_failure_is_a_502_not_a_crash(self, client, monkeypatch):
         monkeypatch.setattr(llm, "_post", lambda *a, **k: "not json at all")

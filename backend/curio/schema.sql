@@ -99,3 +99,20 @@ CREATE TABLE IF NOT EXISTS usage_counters (
     count   INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (subject, day)
 );
+
+-- Generated pages, cached by what was tapped. A hit skips the LLM entirely —
+-- this is the sanctioned answer to slow doors (handoff: "server-side caching
+-- of popular pages"), where speculative client prefetch is not. Content is
+-- only ever written from a successful server-side generation; `model` exists
+-- so a misbehaving model's pages can be purged in one statement.
+CREATE TABLE IF NOT EXISTS page_cache (
+    cache_key    TEXT PRIMARY KEY,               -- lower(trim(label)) || ':' || kind
+    label        TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    blurb        TEXT NOT NULL,
+    buttons_json TEXT NOT NULL,
+    model        TEXT,                           -- NULL when the live path didn't note it
+    hits         INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);

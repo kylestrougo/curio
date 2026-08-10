@@ -62,7 +62,14 @@ class Config:
         "OPENROUTER_BASE", "https://openrouter.ai/api/v1"
     ).rstrip("/")
     # Sent as HTTP-Referer/X-Title; OpenRouter uses these for attribution.
-    OPENROUTER_TIMEOUT = _int("OPENROUTER_TIMEOUT", 90)
+    OPENROUTER_TIMEOUT = _int("OPENROUTER_TIMEOUT", 45)
+    # Hard ceiling on one generation across the WHOLE chain. Without it the
+    # worst case was every model timing out in sequence — 6 attempts × 90s
+    # with a user watching a spinner and a waitress thread (of 4) held the
+    # entire time. A lone slow-but-working model that needed 80s now fails
+    # instead; with free-model p95s in single-digit seconds, that trade is
+    # right for this hardware.
+    GENERATION_BUDGET = _int("CURIO_GENERATION_BUDGET", 60)
 
     # Fallback chain used until an admin saves one. Free models churn — these
     # are a starting point to be re-picked from the admin page, not gospel.

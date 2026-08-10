@@ -51,7 +51,13 @@ carries only the generated labels. When no topics are saved, responds
 the quota — quota counts generations, not requests.
 
 ### `POST /api/page`
-The core call — one per tap.
+The core call — at most one generation per tap. Non-surprise pages are served
+from a server-side cache when the same `(label, kind)` was generated in the
+last week; a hit involves no model call and **deliberately bypasses the
+quota** (which exists to protect the shared free-model budget — a SQLite read
+spends none of it, so the cache check runs before the rate-limit gate; don't
+"fix" the ordering). Cached pages ignore `path` context. `surprise` pages are
+never cached in either direction.
 
 ```jsonc
 // request

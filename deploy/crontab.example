@@ -34,3 +34,9 @@ FLASK=/home/io/curio/backend/.venv/bin/flask
 # Twice a week, at an hour nobody is reading. Costs ~3 free-tier calls when the
 # chain is healthy, which is the usual case.
 40 4 * * 1,4 cd $CURIO && $FLASK refresh-chain >> /home/io/curio/logs/chain.log 2>&1
+
+# Pre-generate pages for starter doors that aren't cached yet, so a visitor's
+# first tap opens instantly. Sequential, small, and at a quiet hour: the cost
+# is OpenRouter free-tier calls (never user quota), and the page cache TTL
+# means roughly this many need re-warming each night once fully covered.
+50 4 * * * cd $CURIO && $FLASK warm-cache --limit 12 >> /home/io/curio/logs/warm.log 2>&1

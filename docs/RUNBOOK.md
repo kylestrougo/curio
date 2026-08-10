@@ -97,16 +97,21 @@ Frontend changes must be built off the Pi and committed — see `DEPLOY.md` §3.
 - **Backups sit on the same SD card as the database.** They survive a bad
   restore or a bad migration; they do not survive the card failing. Copying
   `backups/` off the Pi periodically is worth doing.
-- **Free models are the slow tier.** Multi-second page loads are the
-  architecture, not a bug. Streaming is the deferred fix.
+- **Free models are the slow tier.** A *fresh* page still takes multi-second
+  generation. The page cache absorbs the common cases: any door tapped in the
+  last week opens instantly, and `warm-cache` pre-generates the starter doors
+  nightly. Cache hits don't count against anyone's quota.
+  To purge a misbehaving model's cached pages:
+  `sqlite3 ~/curio/curio.db "DELETE FROM page_cache WHERE model = 'bad/model:free'"`
+  (or simply wait out the 7-day TTL).
 - **No grounding or citations.** Pages are model output, presented as such.
 
 ## Deferred, in rough order of value
 
 1. **Streaming responses** — the largest felt-quality win; makes generation feel
    fast without being faster.
-2. **Server-side caching of popular pages** — cuts quota use and latency for
-   anything already walked.
+2. ~~Server-side caching of popular pages~~ — **done**: `page_cache` table,
+   quota-free hits, nightly `warm-cache`, 7-day TTL via housekeeping.
 3. **Real grounding / citations** via a retrieval layer. The prototype tried
    doing this inside the generation call and it produced truncated JSON; it
    needs to be its own step.

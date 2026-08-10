@@ -53,6 +53,7 @@ export function useWander(user) {
   const [recap, setRecap] = useState(null); // {path, synthesis, thread} | "loading" | {failed:msg}
   const [resumeHint, setResumeHint] = useState(null); // {wander, door} — shown once, quietly
   const [topicalSeeds, setTopicalSeeds] = useState([]); // doors near the user's saved interests
+  const [pendingDoor, setPendingDoor] = useState(null); // {label, type, surprise} while a page loads
 
   const scrollRef = useRef(null);
   const reqId = useRef(0); // ignore stale in-flight responses
@@ -388,6 +389,9 @@ export function useWander(user) {
     const myReq = ++reqId.current;
     setLoading(true);
     setError(null);
+    // The tapped door is known before any network happens — the loading view
+    // shows it as a provisional title instead of a bare spinner.
+    setPendingDoor({ label: surprise ? null : label, type, surprise });
     clearPageExtras();
     setResumeHint(null); // shown once; opening any door retires it
     setView('page');
@@ -422,7 +426,10 @@ export function useWander(user) {
       if (myReq !== reqId.current) return;
       setError({ label, type, resetTo, surprise, quota: !!e.quota, message: e.message });
     } finally {
-      if (myReq === reqId.current) setLoading(false);
+      if (myReq === reqId.current) {
+        setLoading(false);
+        setPendingDoor(null);
+      }
     }
   }
 
@@ -701,6 +708,7 @@ export function useWander(user) {
     qaLoading,
     recap,
     resumeHint,
+    pendingDoor,
     // refs the views read directly
     scrollRef,
     visitedRef,

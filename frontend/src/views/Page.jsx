@@ -1,6 +1,7 @@
 import Door from '../components/Door.jsx';
 import AskBox from '../components/AskBox.jsx';
 import Loading from '../components/Loading.jsx';
+import StagedLoading from '../components/StagedLoading.jsx';
 
 function BookmarkIcon({ filled }) {
   return (
@@ -29,12 +30,13 @@ export default function Page({ w }) {
     openPage,
     closeWander,
     visitedRef,
+    pendingDoor,
   } = w;
 
   return (
     <div className="page">
       {loading ? (
-        <Loading>Opening the door…</Loading>
+        <StagedLoading door={pendingDoor} />
       ) : error ? (
         <div className="errline">
           {error.quota ? (

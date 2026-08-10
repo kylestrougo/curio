@@ -11,7 +11,7 @@ import logging
 from flask import Blueprint, jsonify, request
 from flask_login import current_user, login_required
 
-from . import prompts
+from . import pagecache, prompts
 from .db import execute, get_db, query
 from .llm import LLMError, generate
 from .ratelimit import check_and_count_generation
@@ -169,18 +169,28 @@ def topical_seeds():
 
 @bp.post("/page")
 def page():
-    if (blocked := _gate()):
-        return blocked
     data = _body()
     surprise = bool(data.get("surprise"))
     label = _clean_text(data.get("label"), 300)
     kind = data.get("kind")
     kind = kind if kind in VALID_KINDS else "topic"
-    path = _clean_list(data.get("path"), limit=MAX_PATH_STEPS, item_limit=200)[-MAX_PATH_STEPS:]
-    exclude = _clean_list(data.get("exclude"), limit=20, item_limit=200)
 
     if not surprise and not label:
         return _err("bad_request", "Nothing to open.", 400)
+
+    # Cache first, gate second — deliberately. The quota exists to protect the
+    # shared free-model budget, and a cache hit spends none of it; charging
+    # quota for a SQLite read would punish exactly the taps we made cheap.
+    # Surprise pages skip the cache both ways: their promise is somewhere new.
+    if not surprise:
+        cached = pagecache.get_page(label, kind)
+        if cached:
+            return jsonify(cached)
+
+    if (blocked := _gate()):
+        return blocked
+    path = _clean_list(data.get("path"), limit=MAX_PATH_STEPS, item_limit=200)[-MAX_PATH_STEPS:]
+    exclude = _clean_list(data.get("exclude"), limit=20, item_limit=200)
 
     system, user = prompts.page(label, kind, path, surprise, exclude)
     parsed, error = _generate(system, user, "page")
@@ -192,6 +202,12 @@ def page():
     blurb = _clean_text(parsed.get("blurb"), 1200)
     if not blurb:
         return _err("generation_failed", "The page came back empty. Try again.", 502)
+    if not surprise:
+        # Cached pages ignore the path context ("do not repeat recent steps"),
+        # so a hit's buttons may point somewhere already visited. Accepted:
+        # the page for a label is coherent from any approach, and keying on
+        # path would gut the hit rate this exists for.
+        pagecache.store_page(label, kind, title, blurb, buttons)
     return jsonify({"title": title, "blurb": blurb, "buttons": buttons})
 
 

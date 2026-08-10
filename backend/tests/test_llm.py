@@ -57,7 +57,7 @@ class TestFallbackChain:
         """responses: list of (raw_or_exception) consumed per _post call."""
         calls = []
 
-        def fake_post(model, system, user, max_tokens, json_mode, temperature=None):
+        def fake_post(model, system, user, max_tokens, json_mode, temperature=None, timeout=None):
             calls.append(model)
             item = responses.pop(0)
             if isinstance(item, Exception):
@@ -130,6 +130,47 @@ class TestChainConfig:
             llm.set_config_json(llm.CONFIG_KEY_OVERRIDES, {"seeds": "b"})
             assert llm.chain_for("seeds") == ["b", "a"]
             assert llm.chain_for("page") == ["a", "b"]
+
+
+class TestGenerationBudget:
+    """One deadline across the whole chain — no more 6 × 90s worst cases."""
+
+    def test_budget_stops_the_chain(self, app, monkeypatch):
+        clock = {"t": 0.0}
+        monkeypatch.setattr(llm.time, "monotonic", lambda: clock["t"])
+        calls = []
+
+        def slow_post(model, *a, **k):
+            calls.append(model)
+            clock["t"] += 40  # each attempt eats 40 "seconds"
+            raise llm.LLMError("HTTP 500")
+
+        monkeypatch.setattr(llm, "_post", slow_post)
+        app.config["GENERATION_BUDGET"] = 60
+        with app.app_context():
+            with pytest.raises(llm.LLMError, match="budget exhausted"):
+                llm.generate("s", "u", models=["a", "b", "c"])
+        # a (t=0→40) runs, b (t=40) starts inside budget, c (t=80) never does.
+        assert calls == ["a", "b"]
+
+    def test_per_request_timeout_shrinks_to_the_remainder(self, app, monkeypatch):
+        clock = {"t": 0.0}
+        monkeypatch.setattr(llm.time, "monotonic", lambda: clock["t"])
+        seen = []
+
+        def capture(model, system, user, max_tokens, json_mode, temperature=None, timeout=None):
+            seen.append(timeout)
+            clock["t"] += 40
+            raise llm.LLMError("HTTP 500")
+
+        monkeypatch.setattr(llm, "_post", capture)
+        app.config["GENERATION_BUDGET"] = 60
+        app.config["OPENROUTER_TIMEOUT"] = 45
+        with app.app_context():
+            with pytest.raises(llm.LLMError):
+                llm.generate("s", "u", models=["a", "b"])
+        assert seen[0] == 45   # full budget left, capped by the request timeout
+        assert seen[1] == 20   # only 20s of budget remained
 
 
 class TestTemperature:

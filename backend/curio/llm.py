@@ -190,6 +190,7 @@ def _post(
     max_tokens: int,
     json_mode: bool,
     temperature: float | None = None,
+    timeout: float | None = None,
 ) -> str:
     cfg = current_app.config
     key = cfg["OPENROUTER_API_KEY"]
@@ -219,7 +220,7 @@ def _post(
             "X-Title": "Curio",
         },
         json=body,
-        timeout=cfg["OPENROUTER_TIMEOUT"],
+        timeout=timeout if timeout is not None else cfg["OPENROUTER_TIMEOUT"],
     )
     if res.status_code != 200:
         raise LLMError(f"HTTP {res.status_code}: {res.text[:200]}")
@@ -251,14 +252,22 @@ def generate(
         raise LLMError("no models configured")
 
     temperature = _temperature_for(intent)
+    # One deadline across the whole chain. Each attempt also gets its
+    # per-request timeout clamped to what's left, so the worst case is
+    # roughly the budget — not budget-plus-one-more-timeout.
+    deadline = time.monotonic() + current_app.config["GENERATION_BUDGET"]
     last_error = "no models attempted"
     for model in chain:
         for attempt in range(PARSE_ATTEMPTS_PER_MODEL):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise LLMError(f"generation budget exhausted; last: {last_error}")
             started = time.monotonic()
             try:
                 raw = _post(
                     model, system, user, max_tokens,
                     json_mode=(attempt == 0), temperature=temperature,
+                    timeout=min(current_app.config["OPENROUTER_TIMEOUT"], remaining),
                 )
             except (LLMError, requests.RequestException) as exc:
                 elapsed = int((time.monotonic() - started) * 1000)

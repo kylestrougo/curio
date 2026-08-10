@@ -85,6 +85,12 @@ export function generateSeeds({ count = 4, exclude = [] } = {}) {
   return generate('/api/seeds', { count, exclude });
 }
 
+// → { seeds: [{label, type}] } — anchored to the signed-in user's saved
+// interests, which stay server-side; {seeds: []} when none are configured.
+export function generateTopicalSeeds({ count = 6, exclude = [] } = {}) {
+  return generate('/api/seeds/topical', { count, exclude });
+}
+
 // → { title, blurb, buttons: [{label, type}] }  (exactly 5 buttons)
 export function generatePage({ label = null, kind = 'topic', path = [], surprise = false, exclude = [] } = {}) {
   return generate('/api/page', { label, kind, path, surprise, exclude });

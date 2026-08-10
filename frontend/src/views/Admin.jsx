@@ -4,7 +4,7 @@ import Loading from '../components/Loading.jsx';
 
 // The intents the backend can route per-model. Chain order is the default;
 // an override pins one intent to one model.
-const INTENTS = ['page', 'seeds', 'more', 'ask', 'recap', 'email'];
+const INTENTS = ['page', 'seeds', 'topical_seeds', 'more', 'ask', 'recap', 'email'];
 
 // The catalogue and stats shapes are the backend's to define; read them
 // tolerantly so a rename on the server doesn't blank the page.

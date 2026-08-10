@@ -149,6 +149,57 @@ class TestGeneration:
         assert r.status_code == 200
         assert len(r.get_json()["seeds"]) == 4
 
+    def test_topical_seeds_require_login(self, client, stub_llm):
+        assert client.post("/api/seeds/topical", json={}).status_code == 401
+
+    def test_topical_seeds_without_topics_is_empty_and_free(self, signed_in, stub_llm, app):
+        r = signed_in.post("/api/seeds/topical", json={})
+        assert r.status_code == 200
+        assert r.get_json()["seeds"] == []
+        # Nothing was generated, so nothing was counted against the generation
+        # quota (signup itself writes a separate signup: counter row).
+        with app.app_context():
+            from curio.db import query
+            n = query(
+                "SELECT COUNT(*) AS n FROM usage_counters WHERE subject LIKE 'user:%'",
+                (), one=True,
+            )["n"]
+            assert n == 0
+
+    def test_topical_seeds_use_saved_topics_server_side(self, signed_in, app, monkeypatch):
+        signed_in.put("/api/email-prefs", json={"topics": ["deep sea biology", "old maps"]})
+        prompts_seen = []
+
+        def fake_post(model, system, user, max_tokens, json_mode, temperature=None):
+            prompts_seen.append((system, user))
+            return __import__("json").dumps(
+                {"seeds": [{"label": f"near {i}", "type": "topic"} for i in range(6)]}
+            )
+
+        monkeypatch.setattr(llm, "_post", fake_post)
+        r = signed_in.post(
+            "/api/seeds/topical", json={"count": 6, "exclude": ["already shown"]}
+        )
+        assert r.status_code == 200
+        assert len(r.get_json()["seeds"]) == 6
+        system, user = prompts_seen[0]
+        # The topics reached the prompt without the client ever sending them…
+        assert "deep sea biology" in user
+        assert "already shown" in user
+        # …and the brief demands adjacency, not restatement.
+        assert "adjacent" in system
+
+    def test_topical_seeds_count_against_quota(self, signed_in, stub_llm, app):
+        signed_in.put("/api/email-prefs", json={"topics": ["astronomy"]})
+        assert signed_in.post("/api/seeds/topical", json={}).status_code == 200
+        with app.app_context():
+            from curio.db import query
+            row = query(
+                "SELECT count FROM usage_counters WHERE subject LIKE 'user:%'",
+                (), one=True,
+            )
+            assert row["count"] == 1
+
     def test_more_and_ask_and_recap(self, client, stub_llm):
         assert client.post("/api/more", json={"title": "t", "said": "s"}).get_json()["more"]
         assert client.post(

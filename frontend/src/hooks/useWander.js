@@ -52,6 +52,7 @@ export function useWander(user) {
   const [qaLoading, setQaLoading] = useState(false);
   const [recap, setRecap] = useState(null); // {path, synthesis, thread} | "loading" | {failed:msg}
   const [resumeHint, setResumeHint] = useState(null); // {wander, door} — shown once, quietly
+  const [topicalSeeds, setTopicalSeeds] = useState([]); // doors near the user's saved interests
 
   const scrollRef = useRef(null);
   const reqId = useRef(0); // ignore stale in-flight responses
@@ -61,6 +62,13 @@ export function useWander(user) {
   const dealtRef = useRef(new Set()); // every door dealt this session — never reset
   const refillingRef = useRef(false); // one restock call at a time
   const shufflesRef = useRef(0); // drives the periodic restock
+  // The topical row keeps its own pool, same machinery as the main one.
+  const topicalPoolRef = useRef([]);
+  const topicalSeenRef = useRef(new Set());
+  const topicalRefillingRef = useRef(false);
+  const topicalShufflesRef = useRef(0);
+  const topicalSeedsRef = useRef(topicalSeeds);
+  topicalSeedsRef.current = topicalSeeds;
   const idRef = useRef(0); // unique ids for tree nodes
   const visitedRef = useRef([]); // every page opened this wander, with parent links — the tree
   const seedsRef = useRef(seeds); // seeds read from inside async callbacks
@@ -94,6 +102,10 @@ export function useWander(user) {
     if (!signedIn) {
       setSaved([]);
       setResumeHint(null);
+      setTopicalSeeds([]);
+      topicalPoolRef.current = [];
+      topicalSeenRef.current = new Set();
+      topicalShufflesRef.current = 0;
       wanderIdRef.current = null;
       wanderPromiseRef.current = null;
       serverIdsRef.current = new Map();
@@ -127,6 +139,11 @@ export function useWander(user) {
         if (r && (r.wander || r.door)) setResumeHint(r);
       })
       .catch((e) => shrug('resume', e));
+
+    // One gated call, same shape as loadSeeds. The server checks whether any
+    // topics are saved (they never travel to the client for this); an empty
+    // answer just means the row stays hidden.
+    loadTopicalSeeds(() => live);
 
     return () => {
       live = false;
@@ -285,6 +302,84 @@ export function useWander(user) {
     });
     shufflesRef.current += 1;
     maybeRefillPool(shufflesRef.current % REFILL_EVERY === 0);
+  }
+
+  // ── topical seeds ("things you're curious about") ──────────
+  //
+  // Same pool-and-shuffle machinery as the main doors, fed from the user's
+  // saved interests instead of random domains. Everything dealt here is also
+  // recorded in dealtRef so the two rows exclude each other's doors.
+
+  function addToTopicalPool(newSeeds) {
+    const have = new Set(topicalPoolRef.current.map((s) => s.label));
+    for (const s of newSeeds) {
+      if (s && s.label && !have.has(s.label)) topicalPoolRef.current.push(s);
+    }
+  }
+
+  async function loadTopicalSeeds(stillLive = () => true) {
+    if (topicalRefillingRef.current) return;
+    topicalRefillingRef.current = true;
+    try {
+      const exclude = [...dealtRef.current].slice(-RECENT_EXCLUDE);
+      const j = await api.generateTopicalSeeds({ count: 6, exclude });
+      if (!stillLive()) return;
+      if (j.seeds && j.seeds.length) {
+        addToTopicalPool(j.seeds);
+        const hand = j.seeds.slice(0, 4);
+        for (const s of hand) {
+          topicalSeenRef.current.add(s.label);
+          dealtRef.current.add(s.label);
+        }
+        setTopicalSeeds(hand);
+      }
+    } catch {
+      /* signed out, no topics, or quota — the row simply stays hidden */
+    } finally {
+      topicalRefillingRef.current = false;
+    }
+  }
+
+  async function maybeRefillTopicalPool(force = false) {
+    if (topicalRefillingRef.current) return;
+    const novel = topicalPoolRef.current.filter((s) => !dealtRef.current.has(s.label));
+    if (!force && novel.length >= 8) return;
+    topicalRefillingRef.current = true;
+    try {
+      const exclude = [...dealtRef.current].slice(-RECENT_EXCLUDE);
+      const j = await api.generateTopicalSeeds({ count: 6, exclude });
+      if (j.seeds && j.seeds.length) addToTopicalPool(j.seeds);
+    } catch {
+      /* pool just cycles until the next attempt */
+    } finally {
+      topicalRefillingRef.current = false;
+    }
+  }
+
+  function shuffleTopicalDoors() {
+    setTopicalSeeds((current) => {
+      for (const s of current) {
+        topicalSeenRef.current.add(s.label);
+        dealtRef.current.add(s.label);
+      }
+      const onScreen = current.map((s) => s.label);
+      let fresh = pickSeeds(
+        4,
+        onScreen,
+        topicalPoolRef.current.filter((s) => !topicalSeenRef.current.has(s.label))
+      );
+      if (fresh.length < 4) {
+        topicalSeenRef.current = new Set(onScreen); // recycle, avoid what's showing
+        fresh = [
+          ...fresh,
+          ...pickSeeds(4 - fresh.length, [...onScreen, ...fresh.map((s) => s.label)], topicalPoolRef.current),
+        ];
+      }
+      for (const s of fresh) dealtRef.current.add(s.label);
+      return fresh;
+    });
+    topicalShufflesRef.current += 1;
+    maybeRefillTopicalPool(topicalShufflesRef.current % REFILL_EVERY === 0);
   }
 
   // ── the core tap ───────────────────────────────────────────
@@ -593,6 +688,7 @@ export function useWander(user) {
     trail,
     current,
     seeds,
+    topicalSeeds,
     saved,
     isSaved,
     loading,
@@ -610,6 +706,7 @@ export function useWander(user) {
     visitedRef,
     // actions
     shuffleDoors,
+    shuffleTopicalDoors,
     openPage,
     goToCrumb,
     openSaved,

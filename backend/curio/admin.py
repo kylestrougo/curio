@@ -40,6 +40,7 @@ TEST_INTENTS = {
     # as the allow-list for per-intent overrides, so an email override saved
     # from /admin was silently dropped while the UI appeared to accept it.
     "email": lambda: prompts.email_doors(["astronomy", "old maps"], True, None),
+    "topical_seeds": lambda: prompts.topical_seeds(["deep sea biology", "old maps"], []),
 }
 
 

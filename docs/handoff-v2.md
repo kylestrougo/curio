@@ -59,6 +59,10 @@ Single-file React artifact, "reading room" aesthetic (warm paper, navy ink, bras
 
 **Standing lesson:** the critical path stays one LLM call per tap.
 
+(Within that lesson: a signed-in landing with saved topics now makes **two**
+gated background calls — the main door restock and the topical row — each
+single-flight and off the critical path. Bounded, deliberate, fine.)
+
 ---
 
 # v1 — "Curio, self-hosted" (NEW SCOPE)

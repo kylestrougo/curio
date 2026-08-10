@@ -51,8 +51,19 @@ function ResumeNote({ hint, onReopen, onDoor, onDismiss }) {
 }
 
 export default function Home({ w }) {
-  const { seeds, ask, setAsk, submitAsk, shuffleDoors, openPage, resumeHint, resumeWander, dismissResume } =
-    w;
+  const {
+    seeds,
+    topicalSeeds,
+    ask,
+    setAsk,
+    submitAsk,
+    shuffleDoors,
+    shuffleTopicalDoors,
+    openPage,
+    resumeHint,
+    resumeWander,
+    dismissResume,
+  } = w;
 
   return (
     <div className="home">
@@ -95,6 +106,38 @@ export default function Home({ w }) {
         style={{ marginTop: 10 }}
         onClick={() => openPage(null, 'topic', true, true)}
       />
+
+      {/* Doors near the interests saved in settings. Arrives quietly after
+          the main grid (it needs a generation call), and sits below it so
+          its appearance never shifts the primary doors underfoot. */}
+      {topicalSeeds.length > 0 && (
+        <>
+          <div className="doors-row" style={{ marginTop: 26 }}>
+            <div className="doors-label" style={{ margin: 0 }}>
+              Things you're curious about
+            </div>
+            <button
+              className="shuffle"
+              onClick={shuffleTopicalDoors}
+              title="Show me different doors near my interests"
+            >
+              <ShuffleIcon />
+              Shuffle
+            </button>
+          </div>
+          <div className="doors" key={topicalSeeds.map((s) => s.label).join('|')}>
+            {topicalSeeds.map((s) => (
+              <Door
+                key={s.label}
+                label={s.label}
+                type={s.type}
+                onClick={() => openPage(s.label, s.type, true)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
       <AskBox
         value={ask}
         onChange={setAsk}

@@ -53,12 +53,12 @@ def _clean_list(value, limit: int = 20, item_limit: int = MAX_TEXT_IN) -> list[s
     return out
 
 
-def _normalise_buttons(raw) -> list[dict]:
+def _normalise_buttons(raw, limit: int = 5) -> list[dict]:
     """Free models are loose about the button shape. Coerce it into ours."""
     buttons = []
     if not isinstance(raw, list):
         return buttons
-    for item in raw[:5]:
+    for item in raw[:limit]:
         if isinstance(item, str):
             label, kind = item, "topic"
         elif isinstance(item, dict):
@@ -74,7 +74,9 @@ def _normalise_buttons(raw) -> list[dict]:
 
 
 def _normalise_seeds(raw) -> list[dict]:
-    return _normalise_buttons(raw) if isinstance(raw, list) else []
+    # Seeds allow up to 8 per request; the page-button cap of 5 was silently
+    # trimming any bigger hand (a count=6 call really did return 5).
+    return _normalise_buttons(raw, limit=8) if isinstance(raw, list) else []
 
 
 def _gate():
@@ -115,6 +117,47 @@ def seeds():
 
     system, user = prompts.seeds(count, exclude)
     parsed, error = _generate(system, user, "seeds")
+    if error:
+        return error
+
+    result = _normalise_seeds(parsed.get("seeds"))
+    if not result:
+        return _err("generation_failed", "No doors came back. Try again.", 502)
+    return jsonify({"seeds": result})
+
+
+@bp.post("/seeds/topical")
+@login_required
+def topical_seeds():
+    """Doors anchored to the user's saved interests, for the home page row.
+
+    The topics come from email_prefs server-side — the client never sends
+    them, so the wire carries only generated labels and the interests stay
+    where the user put them.
+    """
+    row = query(
+        "SELECT topics_json FROM email_prefs WHERE user_id = ?",
+        (current_user.id,),
+        one=True,
+    )
+    try:
+        topics = [t for t in json.loads(row["topics_json"]) if isinstance(t, str) and t.strip()] if row else []
+    except (ValueError, TypeError):
+        topics = []
+    if not topics:
+        # Before the gate on purpose: nothing is generated for an empty topic
+        # list, and quota counts generations, not requests.
+        return jsonify({"seeds": []})
+
+    if (blocked := _gate()):
+        return blocked
+    data = _body()
+    count = data.get("count", 6)
+    count = count if isinstance(count, int) and 1 <= count <= 8 else 6
+    exclude = _clean_list(data.get("exclude"), limit=40, item_limit=160)
+
+    system, user = prompts.topical_seeds(topics, exclude, count)
+    parsed, error = _generate(system, user, "topical_seeds")
     if error:
         return error
 

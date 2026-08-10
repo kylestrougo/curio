@@ -70,6 +70,34 @@ class TestSeedPromptQualityRules:
         assert '"seeds"' in system
 
 
+class TestTopicalSeeds:
+    """The home-page row anchored to saved interests."""
+
+    def test_topics_and_excludes_reach_the_user_message(self):
+        _, user = prompts.topical_seeds(["deep sea biology"], ["shown already"])
+        assert "deep sea biology" in user
+        assert "shown already" in user
+
+    def test_demands_adjacency_not_restatement(self):
+        system, _ = prompts.topical_seeds(["old maps"], [])
+        assert "adjacent" in system
+        assert "never a restatement" in system
+
+    def test_bans_stock_trivia_and_fabrication(self):
+        system, _ = prompts.topical_seeds(["history"], [])
+        assert "octopuses having three hearts" in system
+        assert "real, verifiable subject" in system
+
+    def test_seeded_rng_is_reproducible(self):
+        a = prompts.topical_seeds(["x"], [], rng=random.Random(5))
+        b = prompts.topical_seeds(["x"], [], rng=random.Random(5))
+        assert a == b
+
+    def test_angle_varies_between_calls(self):
+        systems = {prompts.topical_seeds(["x"], [])[0] for _ in range(12)}
+        assert len(systems) > 1
+
+
 class TestAntiFabrication:
     """Every prompt inherits the no-invention clause; the risky ones add more.
 

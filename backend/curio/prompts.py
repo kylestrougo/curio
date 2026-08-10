@@ -205,6 +205,41 @@ def recap(path: list[str]) -> tuple[str, str]:
     return system, f"The user wandered through, in order: {' > '.join(path)}.\nClose the wander."
 
 
+def topical_seeds(topics: list[str], exclude: list[str], count: int = 6, rng=None):
+    """Doors for the home page's "things you're curious about" row.
+
+    Same seed contract as seeds()/email_doors(), different brief: these are
+    anchored to the user's stated interests rather than ranging freely. The
+    one rule that makes or breaks it is *adjacency* — an interest restated as
+    a door ("the history of maps" -> "The history of maps") teaches the user
+    the row is a mirror, and they stop tapping it. Not email_doors() because
+    that prompt's register is email-specific ("may not read this today").
+    """
+    rng = rng or random
+    angle = rng.choice(_ANGLES)
+
+    system = (
+        PERSONA
+        + f" Produce {count} irresistible entry points into knowledge for a reader with "
+        "specific stated interests. Every door must be *adjacent* to one of their interests — "
+        "a surprising corner, origin, person, or open question near it — never a restatement "
+        "of the interest itself. "
+        + angle
+        + " Each door must name a real, verifiable subject, specific enough not to be a "
+        "category — 'The clock that runs on melting ice' works, 'Interesting facts about "
+        "clocks' does not. "
+        f"Never use the overused stock trivia: {_OVERUSED}. "
+        + ("Avoid anything close to the excluded list. " if exclude else "")
+        + _JSON_RULE
+        + '{"seeds":[{"label": short enticing text max 8 words, "type": "fact"|"question"|"topic"}]}'
+    )
+    user = f"Their interests: {', '.join(topics)}."
+    if exclude:
+        user += f"\nExcluded (already shown): {' | '.join(exclude)}."
+    user += f"\nGive me {count} doors."
+    return system, user
+
+
 def email_doors(topics: list[str], wildcard: bool, thread: str | None, count: int = 3):
     """Doors for the daily email, generated from the user's own stated topics.
 

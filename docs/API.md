@@ -41,6 +41,15 @@ Home doors, and the shuffle pool restock.
 ```
 `type` is always one of `fact` | `question` | `topic`.
 
+### `POST /api/seeds/topical`
+Doors adjacent to the signed-in user's saved interests (the "things you're
+curious about" row on Home). Requires login. Same request/response shape as
+`/api/seeds` (`count` defaults to 6). The interests are read from the user's
+email preferences **server-side** — the client never sends them, and the wire
+carries only the generated labels. When no topics are saved, responds
+`{"seeds": []}` without generating anything, and therefore without touching
+the quota — quota counts generations, not requests.
+
 ### `POST /api/page`
 The core call — one per tap.
 

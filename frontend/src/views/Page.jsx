@@ -31,6 +31,8 @@ export default function Page({ w }) {
     closeWander,
     visitedRef,
     pendingDoor,
+    streamingMore,
+    streamingQa,
   } = w;
 
   return (
@@ -59,6 +61,9 @@ export default function Page({ w }) {
               {m}
             </p>
           ))}
+          {streamingMore !== null && (
+            <p className="blurb deeper streaming">{streamingMore || '…'}</p>
+          )}
           <div className="save-row">
             <button className={'save' + (isSaved ? ' on' : '')} onClick={toggleSave}>
               <BookmarkIcon filled={isSaved} />
@@ -77,7 +82,16 @@ export default function Page({ w }) {
                   <p className="a">{x.a}</p>
                 </div>
               ))}
-              {qaLoading && <Loading style={{ padding: '10px 2px' }}>Thinking it over…</Loading>}
+              {streamingQa && (
+                <div className="qa">
+                  <p className="q">{streamingQa.q}</p>
+                  {streamingQa.a ? (
+                    <p className="a streaming">{streamingQa.a}</p>
+                  ) : (
+                    <Loading style={{ padding: '10px 2px' }}>Thinking it over…</Loading>
+                  )}
+                </div>
+              )}
             </div>
           )}
           <AskBox

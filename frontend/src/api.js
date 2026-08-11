@@ -80,6 +80,95 @@ async function generate(path, body) {
 
 // ── Generation ───────────────────────────────────────────────
 
+// ── streaming ────────────────────────────────────────────────
+//
+// more/ask can stream: they're single prose fields, so tokens go straight to
+// the screen. The server only falls back between models BEFORE the first
+// token; a mid-stream death arrives as an SSE error event, and callers are
+// expected to retry the non-streaming endpoint (one fresh call, not a loop).
+
+async function streamText(path, body, onChunk) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, 'network', fallbackMessage(0, 'network'));
+  }
+
+  const ctype = res.headers.get('content-type') || '';
+  if (!res.ok || !ctype.includes('text/event-stream') || !res.body) {
+    // The gate and validation errors still arrive as ordinary JSON.
+    let data = null;
+    try {
+      data = JSON.parse(await res.text());
+    } catch {
+      data = null;
+    }
+    const code = (data && data.error) || `http_${res.status}`;
+    throw new ApiError(res.status, code, (data && data.message) || fallbackMessage(res.status, code));
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = 'message';
+      let dataStr = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+      }
+      if (event === 'done') return full;
+      if (event === 'error') {
+        throw new ApiError(502, 'stream_failed', dataStr ? JSON.parse(dataStr) : 'The stream broke off.');
+      }
+      if (dataStr) {
+        const chunk = JSON.parse(dataStr);
+        full += chunk;
+        if (onChunk) onChunk(chunk, full);
+      }
+    }
+  }
+  // Connection closed without a done event — trust nothing partial.
+  throw new ApiError(0, 'stream_failed', 'The stream broke off.');
+}
+
+// Streams tokens via onChunk and resolves with the full text; falls back to
+// the JSON endpoint on any streaming failure (except quota — a second ask
+// can't buy back a spent cap).
+export async function streamMore({ title, said }, onChunk) {
+  try {
+    return await streamText('/api/more/stream', { title, said }, onChunk);
+  } catch (e) {
+    if (e instanceof ApiError && e.quota) throw e;
+    const j = await generateMore({ title, said });
+    return j.more;
+  }
+}
+
+export async function streamAsk({ title, said, question }, onChunk) {
+  try {
+    return await streamText('/api/ask/stream', { title, said, question }, onChunk);
+  } catch (e) {
+    if (e instanceof ApiError && e.quota) throw e;
+    const j = await generateAsk({ title, said, question });
+    return j.answer;
+  }
+}
+
 // → { seeds: [{label, type}] }
 export function generateSeeds({ count = 4, exclude = [] } = {}) {
   return generate('/api/seeds', { count, exclude });

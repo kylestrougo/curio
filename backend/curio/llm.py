@@ -234,6 +234,114 @@ def _post(
         raise LLMError(f"unexpected response shape: {str(data)[:200]}")
 
 
+def _post_stream(model: str, system: str, user: str, max_tokens: int, temperature: float | None):
+    """Yield content deltas from one model's streaming response.
+
+    Raises LLMError before the first yield when the model is unreachable or
+    rejects the request; after the first yield an error propagates mid-stream
+    (the caller decides what that means — see generate_stream).
+    """
+    cfg = current_app.config
+    key = cfg["OPENROUTER_API_KEY"]
+    if not key:
+        raise LLMError("OPENROUTER_API_KEY is not set")
+
+    body = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "stream": True,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if temperature is not None:
+        body["temperature"] = temperature
+
+    res = requests.post(
+        f"{cfg['OPENROUTER_BASE']}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": cfg["PUBLIC_URL"],
+            "X-Title": "Curio",
+        },
+        json=body,
+        stream=True,
+        # The read timeout applies between chunks on a streaming response, so
+        # this bounds stalls, not total duration — a stream that is actually
+        # producing tokens is allowed to keep going.
+        timeout=cfg["OPENROUTER_TIMEOUT"],
+    )
+    if res.status_code != 200:
+        detail = res.text[:200]
+        res.close()
+        raise LLMError(f"HTTP {res.status_code}: {detail}")
+
+    try:
+        for line in res.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data:"):
+                continue
+            payload = line[len("data:"):].strip()
+            if payload == "[DONE]":
+                return
+            try:
+                delta = json.loads(payload)["choices"][0].get("delta", {})
+            except (ValueError, KeyError, IndexError, TypeError):
+                continue  # keep-alives and malformed frames are not fatal
+            chunk = delta.get("content")
+            if chunk:
+                yield chunk
+    finally:
+        res.close()
+
+
+def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000):
+    """Yield prose chunks, walking the chain — but only UNTIL first content.
+
+    The fallback chain and streaming are fundamentally at odds: once a byte
+    has reached the client, silently switching to another model would splice
+    two different answers mid-sentence. So the rule is: fall through freely
+    while nothing has been yielded; after the first chunk, a failure raises
+    and the caller surfaces it (the client falls back to the non-streaming
+    endpoint, a fresh call).
+
+    Stats record latency as time-to-first-token — not directly comparable to
+    the full-response latencies bench-models reports.
+    """
+    chain = chain_for(intent)
+    if not chain:
+        raise LLMError("no models configured")
+
+    temperature = _temperature_for(intent)
+    last_error = "no models attempted"
+    for model in chain:
+        started = time.monotonic()
+        yielded = False
+        try:
+            for chunk in _post_stream(model, system, user, max_tokens, temperature):
+                if not yielded:
+                    yielded = True
+                    _record(model, intent, True, int((time.monotonic() - started) * 1000), None)
+                yield chunk
+            if yielded:
+                return
+            # Stream closed without a single token: treat as this model failing.
+            last_error = "stream produced no content"
+            _record(model, intent, False, int((time.monotonic() - started) * 1000), last_error)
+        except (LLMError, requests.RequestException) as exc:
+            elapsed = int((time.monotonic() - started) * 1000)
+            last_error = f"{type(exc).__name__}: {exc}"
+            if yielded:
+                # Content already left the building; no silent model swap.
+                _record(model, intent, False, elapsed, f"mid-stream: {last_error}")
+                raise LLMError(f"stream died mid-answer: {last_error}")
+            _record(model, intent, False, elapsed, last_error)
+            log.warning("model %s failed before first token (%s) — falling through", model, last_error)
+
+    raise LLMError(last_error)
+
+
 def generate(
     system: str,
     user: str,

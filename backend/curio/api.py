@@ -8,12 +8,12 @@ from __future__ import annotations
 import json
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 from flask_login import current_user, login_required
 
 from . import pagecache, prompts
 from .db import execute, get_db, query
-from .llm import LLMError, generate
+from .llm import LLMError, generate, generate_stream
 from .ratelimit import check_and_count_generation
 
 log = logging.getLogger(__name__)
@@ -250,6 +250,89 @@ def ask():
     if not answer:
         return _err("generation_failed", "That one didn't come through.", 502)
     return jsonify({"answer": answer})
+
+
+# ── streaming variants of more/ask ──────────────────────────────────────
+#
+# These two intents are single prose fields, so their tokens can go straight
+# to the screen. The JSON endpoints above remain the client's fallback: the
+# fallback chain only operates BEFORE the first streamed token (switching
+# models after bytes have shipped would splice two answers), so a mid-stream
+# death surfaces as an SSE error event and the client re-asks non-streaming.
+
+
+def _sse_response(system: str, user: str, intent: str) -> Response:
+    def events():
+        sent_any = False
+        held = ""  # buffer until we know the reply doesn't open with a fence
+        try:
+            for chunk in generate_stream(system, user, intent):
+                if not sent_any:
+                    held += chunk
+                    stripped = held.lstrip()
+                    if not stripped:
+                        continue
+                    if stripped.startswith("`"):
+                        # Model opened with a code fence despite the prose
+                        # prompt. Hold until its line ends, then drop it.
+                        if "\n" not in stripped:
+                            continue
+                        held = stripped.split("\n", 1)[1]
+                        if not held.strip():
+                            continue
+                    else:
+                        held = stripped
+                    sent_any = True
+                    yield f"data: {json.dumps(held)}\n\n"
+                    continue
+                yield f"data: {json.dumps(chunk)}\n\n"
+            if not sent_any:
+                yield f"event: error\ndata: {json.dumps('Nothing came back.')}\n\n"
+                return
+            yield "event: done\ndata: {}\n\n"
+        except LLMError as exc:
+            log.error("stream failed for %s: %s", intent, exc)
+            yield f"event: error\ndata: {json.dumps('That answer broke off.')}\n\n"
+
+    return Response(
+        # stream_with_context: the generator runs while the response is being
+        # consumed, after the view returned — without this, current_app and
+        # the per-request DB connection are gone by the first chunk.
+        stream_with_context(events()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            # Tells buffering proxies to pass chunks through as they come.
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@bp.post("/more/stream")
+def more_stream():
+    if (blocked := _gate()):
+        return blocked
+    data = _body()
+    title = _clean_text(data.get("title"), 300)
+    said = _clean_text(data.get("said"), MAX_SAID_CHARS)
+    if not title:
+        return _err("bad_request", "Which page?", 400)
+    system, user = prompts.more_prose(title, said)
+    return _sse_response(system, user, "more")
+
+
+@bp.post("/ask/stream")
+def ask_stream():
+    if (blocked := _gate()):
+        return blocked
+    data = _body()
+    title = _clean_text(data.get("title"), 300)
+    said = _clean_text(data.get("said"), MAX_SAID_CHARS)
+    question = _clean_text(data.get("question"), 500)
+    if not question:
+        return _err("bad_request", "Ask something first.", 400)
+    system, user = prompts.ask_prose(title, said, question)
+    return _sse_response(system, user, "ask")
 
 
 @bp.post("/recap")

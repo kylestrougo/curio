@@ -108,8 +108,14 @@ Frontend changes must be built off the Pi and committed — see `DEPLOY.md` §3.
 
 ## Deferred, in rough order of value
 
-1. **Streaming responses** — the largest felt-quality win; makes generation feel
-   fast without being faster.
+1. ~~Streaming responses~~ — **done for "tell me more" and Q&A** (the prose
+   intents; tokens render as they arrive, with the JSON endpoints as
+   fallback). Page streaming stays deferred: a page is structured JSON,
+   useless until nearly complete, and streaming it means a wire-format
+   change plus re-vetting every model in the chain.
+   *Caveat:* streamed delivery through Tailscale Funnel should be verified
+   once (`curl -N` against the public URL and watch tokens trickle); if
+   Funnel buffers, the UI silently degrades to whole-answer delivery.
 2. ~~Server-side caching of popular pages~~ — **done**: `page_cache` table,
    quota-free hits, nightly `warm-cache`, 7-day TTL via housekeeping.
 3. **Real grounding / citations** via a retrieval layer. The prototype tried

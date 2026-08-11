@@ -50,6 +50,16 @@ carries only the generated labels. When no topics are saved, responds
 `{"seeds": []}` without generating anything, and therefore without touching
 the quota — quota counts generations, not requests.
 
+### `POST /api/more/stream` and `POST /api/ask/stream`
+Streaming variants of `/api/more` and `/api/ask` (same request bodies). The
+response is `text/event-stream`: unnamed events carry JSON-encoded prose
+chunks, a final `done` event ends the answer, and an `error` event means the
+stream failed — clients should retry once against the JSON endpoint. The
+model fallback chain operates only *before* the first token (switching models
+mid-answer would splice two different answers); rate limiting is identical to
+the JSON endpoints. Only these two intents stream: they are single prose
+fields, whereas a page is structured JSON that is useless until complete.
+
 ### `POST /api/page`
 The core call — at most one generation per tap. Non-surprise pages are served
 from a server-side cache when the same `(label, kind)` was generated in the

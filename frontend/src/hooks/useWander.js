@@ -54,6 +54,8 @@ export function useWander(user) {
   const [resumeHint, setResumeHint] = useState(null); // {wander, door} — shown once, quietly
   const [topicalSeeds, setTopicalSeeds] = useState([]); // doors near the user's saved interests
   const [pendingDoor, setPendingDoor] = useState(null); // {label, type, surprise} while a page loads
+  const [streamingMore, setStreamingMore] = useState(null); // prose arriving token by token
+  const [streamingQa, setStreamingQa] = useState(null); // {q, a} arriving token by token
 
   const scrollRef = useRef(null);
   const reqId = useRef(0); // ignore stale in-flight responses
@@ -497,15 +499,22 @@ export function useWander(user) {
     const idx = trail.length - 1;
     const { nodeId, title, blurb, more = [], qa = [] } = current;
     setMoreLoading(true);
+    setStreamingMore('');
     try {
-      const j = await api.generateMore({ title, said: [blurb, ...more].join(' ') });
-      if (j.more) {
-        patchPage(idx, title, (p) => ({ more: [...(p.more || []), j.more] }));
-        persistPatch(nodeId, { more: [...more, j.more], qa });
+      // Streams into a provisional paragraph as tokens arrive; the finished
+      // text is then committed to the page like the non-streaming path did.
+      const text = await api.streamMore(
+        { title, said: [blurb, ...more].join(' ') },
+        (_chunk, full) => setStreamingMore(full)
+      );
+      if (text) {
+        patchPage(idx, title, (p) => ({ more: [...(p.more || []), text] }));
+        persistPatch(nodeId, { more: [...more, text], qa });
       }
     } catch {
       /* leave page as-is; button simply stops loading */
     } finally {
+      setStreamingMore(null);
       setMoreLoading(false);
     }
   }
@@ -517,16 +526,21 @@ export function useWander(user) {
     const { nodeId, title, blurb, more = [], qa = [] } = current;
     setFollowQ('');
     setQaLoading(true);
+    setStreamingQa({ q, a: '' });
     try {
-      const j = await api.generateAsk({ title, said: [blurb, ...more].join(' '), question: q });
-      if (j.answer) {
-        patchPage(idx, title, (p) => ({ qa: [...(p.qa || []), { q, a: j.answer }] }));
-        persistPatch(nodeId, { more, qa: [...qa, { q, a: j.answer }] });
+      const answer = await api.streamAsk(
+        { title, said: [blurb, ...more].join(' '), question: q },
+        (_chunk, full) => setStreamingQa({ q, a: full })
+      );
+      if (answer) {
+        patchPage(idx, title, (p) => ({ qa: [...(p.qa || []), { q, a: answer }] }));
+        persistPatch(nodeId, { more, qa: [...qa, { q, a: answer }] });
       }
     } catch (e) {
       const a = e.quota ? e.message : "That one didn't come through — try asking again.";
       patchPage(idx, title, (p) => ({ qa: [...(p.qa || []), { q, a }] }));
     } finally {
+      setStreamingQa(null);
       setQaLoading(false);
     }
   }
@@ -709,6 +723,8 @@ export function useWander(user) {
     recap,
     resumeHint,
     pendingDoor,
+    streamingMore,
+    streamingQa,
     // refs the views read directly
     scrollRef,
     visitedRef,

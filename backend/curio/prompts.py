@@ -195,6 +195,35 @@ def ask(title: str, said: str, question: str) -> tuple[str, str]:
     return system, f'Page: "{title}".\nPage says: {said}\nFollow-up question: {question}'
 
 
+# Streaming variants of more/ask. These two intents are a single prose field,
+# which is what makes them streamable at all: dropping the JSON wrapper means
+# tokens can go straight to the screen with nothing to parse. Page stays
+# JSON-only — streaming a structured object means the browser holding
+# `{"title": "Why do we dre` until it's nearly complete, which wins nothing.
+
+
+def more_prose(title: str, said: str) -> tuple[str, str]:
+    system = (
+        PERSONA
+        + " Respond with ONLY the prose of your answer — no JSON, no markdown, no preamble. "
+        "Write 3-4 vivid accurate sentences. "
+        "Go one level deeper on the page — new detail, mechanism, or story. "
+        "Do not repeat anything already said."
+    )
+    return system, f'Page: "{title}".\nAlready said: {said}\nTell me more.'
+
+
+def ask_prose(title: str, said: str, question: str) -> tuple[str, str]:
+    system = (
+        PERSONA
+        + " Respond with ONLY the prose of your answer — no JSON, no markdown, no preamble. "
+        "Write 2-4 clear accurate sentences. "
+        "Answer the user's follow-up question in the context of the page. "
+        "If you do not know, say so plainly instead of guessing."
+    )
+    return system, f'Page: "{title}".\nPage says: {said}\nFollow-up question: {question}'
+
+
 def recap(path: list[str]) -> tuple[str, str]:
     system = (
         PERSONA + " " + _JSON_RULE

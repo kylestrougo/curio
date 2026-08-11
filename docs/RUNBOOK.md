@@ -38,6 +38,21 @@ free catalogue retires models without notice.
 .venv/bin/flask refresh-chain --force         # adopt the fastest survivors
 ```
 
+**Doors feel slow.** Don't guess — the database logs every call. Two
+commands, in order:
+```bash
+.venv/bin/flask diagnose-doors        # reads the evidence: instant, free
+.venv/bin/flask bench-experiments     # live A/B of each speed knob, ~3 min
+```
+`diagnose-doors` says whether the same model actually got slower across a
+deploy, whether the first chain model is failing (each failure silently adds
+its full wait before the backup answers — the classic cause), and whether
+the page cache is serving anything. `bench-experiments` then times the live
+model with one setting changed per arm (temperature, JSON mode, prompt size,
+reply budget) and names the winner; differences under ~20% are noise at the
+default 3 rounds. If no arm wins, the settings aren't the problem — re-rank
+models (`bench-models --all-free`) and pin a faster one as the page override.
+
 **Pages read confidently wrong** (invented events, made-up terminology).
 Generation runs at a low temperature and the prompts forbid invention, but
 those only narrow the odds — the model itself is the biggest lever. Run

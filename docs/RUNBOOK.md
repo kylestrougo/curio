@@ -87,6 +87,27 @@ sudo systemctl restart curio
 
 Frontend changes must be built off the Pi and committed — see `DEPLOY.md` §3.
 
+## Rolling back a release
+
+Versions are named branches: `v1` is the pre-enhancement production, `v2` the
+enhancement batch, and so on — a new one gets pushed before each deploy worth
+being able to step back from (`git push origin main:refs/heads/v3`).
+
+```bash
+# go back to the previous version
+cd ~/curio && git fetch origin && git checkout v1
+sudo systemctl restart curio
+
+# return to the newest version later
+git checkout main && git pull
+sudo systemctl restart curio
+```
+
+The database never needs rolling back: schema changes are additive-only (see
+`db.py:_ensure_column`), so an older version runs cleanly against an upgraded
+database — it simply ignores columns and tables it doesn't know. Wanders,
+saves, and settings survive a rollback untouched.
+
 ## Known limits
 
 - **Signup is open and the host is public.** The caps in `.env`

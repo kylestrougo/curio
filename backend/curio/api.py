@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 from flask_login import current_user, login_required
@@ -252,6 +253,61 @@ def ask():
     return jsonify({"answer": answer})
 
 
+class BlurbExtractor:
+    """Watches JSON stream out of a model and plucks the blurb text live.
+
+    The page prompt fixes the key order — title, blurb, buttons — so once
+    `"blurb"` and its opening quote have gone past, everything up to the
+    closing unescaped quote is prose the reader can start reading. This is
+    strictly cosmetic: the authoritative page is parsed from the complete
+    text afterwards, so when a model mangles its JSON too badly to track the
+    extractor just stops emitting and the reader waits for the whole page,
+    exactly as before streaming existed.
+
+    Handles: chunk boundaries anywhere (including mid-escape), \\" and \\n
+    escapes, and models that use curly quotes for the delimiters themselves.
+    """
+
+    _QUOTES = '"“”'
+
+    def __init__(self):
+        self._buf = ""          # everything seen, used to find the key
+        self._in_blurb = False
+        self._done = False
+        self._pending_escape = False
+
+    def feed(self, chunk: str) -> str:
+        """Consume the next raw chunk, return blurb text ready to show."""
+        if self._done:
+            return ""
+        out = []
+        for ch in chunk:
+            if self._done:
+                break
+            if not self._in_blurb:
+                self._buf += ch
+                if not self._blurb_open():
+                    continue
+                self._in_blurb = True
+                continue
+            if self._pending_escape:
+                self._pending_escape = False
+                out.append({"n": "\n", "t": "\t"}.get(ch, ch))
+                continue
+            if ch == "\\":
+                self._pending_escape = True
+                continue
+            if ch in self._QUOTES:
+                self._done = True
+                continue
+            out.append(ch)
+        return "".join(out)
+
+    def _blurb_open(self) -> bool:
+        """True the moment the buffer ends at `"blurb" ... : ... "`."""
+        return re.search(r'["“”]blurb["“”]\s*:\s*["“”]$', self._buf) is not None
+
+
 # ── streaming variants of more/ask ──────────────────────────────────────
 #
 # These two intents are single prose fields, so their tokens can go straight
@@ -333,6 +389,79 @@ def ask_stream():
         return _err("bad_request", "Ask something first.", 400)
     system, user = prompts.ask_prose(title, said, question)
     return _sse_response(system, user, "ask")
+
+
+@bp.post("/page/stream")
+def page_stream():
+    """Streaming door-open: blurb words as they're written, full page at done.
+
+    The page stays structured JSON on the wire from the model; the
+    BlurbExtractor forwards just the blurb's characters as they stream, and
+    the complete text is then parsed with the same tolerant path as
+    /api/page. Cache and quota semantics are identical to /api/page — a
+    cache hit is a single immediate done event and costs nothing.
+    """
+    data = _body()
+    surprise = bool(data.get("surprise"))
+    label = _clean_text(data.get("label"), 300)
+    kind = data.get("kind")
+    kind = kind if kind in VALID_KINDS else "topic"
+
+    if not surprise and not label:
+        return _err("bad_request", "Nothing to open.", 400)
+
+    if not surprise:
+        cached = pagecache.get_page(label, kind)
+        if cached:
+            return Response(
+                f"event: done\ndata: {json.dumps(cached)}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+    if (blocked := _gate()):
+        return blocked
+    path = _clean_list(data.get("path"), limit=MAX_PATH_STEPS, item_limit=200)[-MAX_PATH_STEPS:]
+    exclude = _clean_list(data.get("exclude"), limit=20, item_limit=200)
+    system, user = prompts.page(label, kind, path, surprise, exclude)
+
+    def events():
+        extractor = BlurbExtractor()
+        raw_parts = []
+        try:
+            for chunk in generate_stream(system, user, "page"):
+                raw_parts.append(chunk)
+                text = extractor.feed(chunk)
+                if text:
+                    yield f"data: {json.dumps(text)}\n\n"
+        except LLMError as exc:
+            log.error("page stream failed: %s", exc)
+            yield f"event: error\ndata: {json.dumps('That door did not open.')}\n\n"
+            return
+
+        # The streamed blurb was cosmetic; this parse is the real page.
+        from .llm import parse_json_loose
+
+        try:
+            parsed = parse_json_loose("".join(raw_parts))
+        except ValueError:
+            yield f"event: error\ndata: {json.dumps('The page came back scrambled. Try again.')}\n\n"
+            return
+        buttons = _normalise_buttons(parsed.get("buttons"))
+        title = _clean_text(parsed.get("title"), 300) or label or "Somewhere unexpected"
+        blurb = _clean_text(parsed.get("blurb"), 1200)
+        if not blurb:
+            yield f"event: error\ndata: {json.dumps('The page came back empty. Try again.')}\n\n"
+            return
+        if not surprise:
+            pagecache.store_page(label, kind, title, blurb, buttons)
+        yield f"event: done\ndata: {json.dumps({'title': title, 'blurb': blurb, 'buttons': buttons})}\n\n"
+
+    return Response(
+        stream_with_context(events()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @bp.post("/recap")

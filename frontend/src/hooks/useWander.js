@@ -56,6 +56,7 @@ export function useWander(user) {
   const [pendingDoor, setPendingDoor] = useState(null); // {label, type, surprise} while a page loads
   const [streamingMore, setStreamingMore] = useState(null); // prose arriving token by token
   const [streamingQa, setStreamingQa] = useState(null); // {q, a} arriving token by token
+  const [streamingBlurb, setStreamingBlurb] = useState(''); // page blurb arriving as the door opens
 
   const scrollRef = useRef(null);
   const reqId = useRef(0); // ignore stale in-flight responses
@@ -405,13 +406,21 @@ export function useWander(user) {
       ? [...visitedRef.current.slice(-12).map((n) => n.title), ...seedsRef.current.map((s) => s.label)]
       : [];
     try {
-      const j = await api.generatePage({
-        label: surprise ? null : label,
-        kind: type,
-        path: priorTitles,
-        surprise,
-        exclude,
-      });
+      const j = await api.streamPage(
+        {
+          label: surprise ? null : label,
+          kind: type,
+          path: priorTitles,
+          surprise,
+          exclude,
+        },
+        // Blurb words as the model writes them — shown under the provisional
+        // title while the rest of the page finishes. Guarded against stale
+        // taps the same way the final result is.
+        (_chunk, full) => {
+          if (myReq === reqId.current) setStreamingBlurb(full);
+        }
+      );
       if (myReq !== reqId.current) return; // user navigated away — drop stale result
       const page = {
         nodeId: ++idRef.current,
@@ -431,6 +440,7 @@ export function useWander(user) {
       if (myReq === reqId.current) {
         setLoading(false);
         setPendingDoor(null);
+        setStreamingBlurb('');
       }
     }
   }
@@ -723,6 +733,7 @@ export function useWander(user) {
     recap,
     resumeHint,
     pendingDoor,
+    streamingBlurb,
     streamingMore,
     streamingQa,
     // refs the views read directly

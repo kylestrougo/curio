@@ -31,6 +31,7 @@ export default function Page({ w }) {
     closeWander,
     visitedRef,
     pendingDoor,
+    streamingBlurb,
     streamingMore,
     streamingQa,
   } = w;
@@ -38,7 +39,20 @@ export default function Page({ w }) {
   return (
     <div className="page">
       {loading ? (
-        <StagedLoading door={pendingDoor} />
+        streamingBlurb ? (
+          // The blurb is arriving — show it under the provisional title.
+          // Buttons appear when the full page lands.
+          <div className="page-skeleton">
+            {pendingDoor && (
+              <h2 className="ghost-title">
+                {pendingDoor.surprise ? 'Somewhere unexpected…' : pendingDoor.label}
+              </h2>
+            )}
+            <p className="blurb streaming">{streamingBlurb}</p>
+          </div>
+        ) : (
+          <StagedLoading door={pendingDoor} />
+        )
       ) : error ? (
         <div className="errline">
           {error.quota ? (

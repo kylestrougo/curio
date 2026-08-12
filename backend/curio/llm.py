@@ -278,6 +278,11 @@ def _post_stream(model: str, system: str, user: str, max_tokens: int, temperatur
         res.close()
         raise LLMError(f"HTTP {res.status_code}: {detail}")
 
+    # SSE bodies arrive without an explicit charset, and requests' fallback
+    # guess for text/* is Latin-1 — which turns every UTF-8 curly quote into
+    # "â€™" on screen. The stream is UTF-8; say so before decoding.
+    res.encoding = "utf-8"
+
     try:
         for line in res.iter_lines(decode_unicode=True):
             if not line or not line.startswith("data:"):

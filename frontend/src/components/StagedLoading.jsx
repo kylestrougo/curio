@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react';
 import Loading from './Loading.jsx';
 
-// The wait for a page, made honest. The tapped door is known before any
-// network happens, so it shows as a provisional title instead of a bare
-// spinner — and the caption escalates on the same schedule the backend
-// actually follows: free models really are slow, and the chain really does
-// fall through to another model when one stalls.
+// The wait for a page. The tapped door is known before any network happens,
+// so it shows as a provisional title instead of a bare spinner. Captions stay
+// neutral on purpose — no talk of models or infrastructure while someone is
+// just trying to read.
 const STAGES = [
   { after: 0, text: 'Opening the door…' },
-  { after: 7000, text: 'Still working — free models can be slow…' },
-  { after: 20000, text: 'Trying another model…' },
+  { after: 12000, text: 'Still opening…' },
 ];
 
 export default function StagedLoading({ door }) {

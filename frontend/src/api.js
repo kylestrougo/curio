@@ -131,7 +131,16 @@ async function streamText(path, body, onChunk) {
         if (line.startsWith('event:')) event = line.slice(6).trim();
         else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
       }
-      if (event === 'done') return full;
+      if (event === 'done') {
+        // more/ask send an empty done; page's done carries the finished page.
+        let payload = null;
+        try {
+          payload = dataStr ? JSON.parse(dataStr) : null;
+        } catch {
+          payload = null;
+        }
+        return { full, done: payload };
+      }
       if (event === 'error') {
         throw new ApiError(502, 'stream_failed', dataStr ? JSON.parse(dataStr) : 'The stream broke off.');
       }
@@ -151,7 +160,8 @@ async function streamText(path, body, onChunk) {
 // can't buy back a spent cap).
 export async function streamMore({ title, said }, onChunk) {
   try {
-    return await streamText('/api/more/stream', { title, said }, onChunk);
+    const r = await streamText('/api/more/stream', { title, said }, onChunk);
+    return r.full;
   } catch (e) {
     if (e instanceof ApiError && e.quota) throw e;
     const j = await generateMore({ title, said });
@@ -161,11 +171,26 @@ export async function streamMore({ title, said }, onChunk) {
 
 export async function streamAsk({ title, said, question }, onChunk) {
   try {
-    return await streamText('/api/ask/stream', { title, said, question }, onChunk);
+    const r = await streamText('/api/ask/stream', { title, said, question }, onChunk);
+    return r.full;
   } catch (e) {
     if (e instanceof ApiError && e.quota) throw e;
     const j = await generateAsk({ title, said, question });
     return j.answer;
+  }
+}
+
+// Streaming door-open: onChunk receives blurb text as the model writes it;
+// resolves with the finished page {title, blurb, buttons}. Falls back to the
+// JSON endpoint on any stream failure except quota.
+export async function streamPage(body, onChunk) {
+  try {
+    const r = await streamText('/api/page/stream', body, onChunk);
+    if (r.done && r.done.title) return r.done;
+    throw new ApiError(502, 'stream_failed', 'The page never finished.');
+  } catch (e) {
+    if (e instanceof ApiError && e.quota) throw e;
+    return generatePage(body);
   }
 }
 

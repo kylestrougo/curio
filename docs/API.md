@@ -60,6 +60,14 @@ mid-answer would splice two different answers); rate limiting is identical to
 the JSON endpoints. Only these two intents stream: they are single prose
 fields, whereas a page is structured JSON that is useless until complete.
 
+### `POST /api/page/stream`
+Streaming door-open (same request body as `/api/page`). Unnamed SSE events
+carry the **blurb's** text as the model writes it — plucked live out of the
+JSON the model is emitting, cosmetic only; `done` carries the authoritative
+full `{title, blurb, buttons}` parsed from the complete reply; `error` means
+fall back to `/api/page`. Cache and quota semantics are identical to
+`/api/page` — a cache hit is a single immediate `done` and costs nothing.
+
 ### `POST /api/page`
 The core call — at most one generation per tap. Non-surprise pages are served
 from a server-side cache when the same `(label, kind)` was generated in the

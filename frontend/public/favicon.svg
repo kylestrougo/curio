@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The header's mark (curio.css .mark), redrawn for the tab: the same
+       door — squared hinge side, rounded swing side, brass knob — with a
+       thicker stroke so it survives 16x16, and an ink that flips to paper
+       on dark tab bars so it never vanishes. -->
+  <style>
+    .door { stroke: #1C2B3A; }
+    @media (prefers-color-scheme: dark) {
+      .door { stroke: #F4F2EB; }
+    }
+  </style>
+  <path class="door"
+        d="M 10 3 H 15 A 10 10 0 0 1 25 13 V 19 A 10 10 0 0 1 15 29 H 10 A 3 3 0 0 1 7 26 V 6 A 3 3 0 0 1 10 3 Z"
+        fill="none" stroke-width="2.5" stroke-linejoin="round" />
+  <circle cx="20" cy="15.5" r="2.2" fill="#A9781F" />
+</svg>

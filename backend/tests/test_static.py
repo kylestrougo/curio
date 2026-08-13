@@ -57,6 +57,32 @@ def test_never_serves_anything_outside_the_build_dir(built_app, path):
     assert b"OPENROUTER_API_KEY" not in r.data
 
 
+def test_serves_the_favicon_from_the_dist_root(built_app, app):
+    """Vite copies public/favicon.svg to the dist root; the catch-all must
+    hand it out with an SVG content type, not fall back to the SPA."""
+    import pathlib
+
+    dist = pathlib.Path(app.config["STATIC_DIR"])
+    (dist / "favicon.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+    r = built_app.test_client().get("/favicon.svg")
+    assert r.status_code == 200
+    assert "svg" in r.mimetype
+    assert b"<svg" in r.data
+
+
+def test_the_real_favicon_is_in_the_committed_build():
+    """The Pi serves the committed dist verbatim — a favicon that only exists
+    in public/ but not in dist/ ships a 404 (well, an SPA fallback)."""
+    import pathlib
+
+    dist = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    icon = dist / "favicon.svg"
+    assert icon.exists(), "run `npm run build` and commit dist/"
+    body = icon.read_text()
+    assert "#A9781F" in body  # the brass knob survived the copy
+    assert 'href="/favicon.svg"' in (dist / "index.html").read_text()
+
+
 def test_api_paths_do_not_fall_through_to_the_spa(built_app):
     """An unknown /api/* must be a JSON 404, not an HTML page."""
     r = built_app.test_client().get("/api/definitely-not-real")

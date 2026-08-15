@@ -88,6 +88,18 @@ body { margin: 0; background: #F4F2EB; }
 .save:hover{border-color:var(--brass); color:var(--ink);}
 .save.on{background:var(--brass); border-color:var(--brass); color:#FBFAF6;}
 .save svg{width:14px; height:14px;}
+/* Phones: keep all three pills on one line by compacting them a little,
+   rather than letting the row wrap. */
+@media (max-width:480px){
+  .save-row{flex-wrap:nowrap; gap:8px;}
+  .save{font-size:12px; padding:7px 11px; gap:5px;}
+  .save svg{width:13px; height:13px;}
+}
+@media (max-width:340px){
+  .save-row{gap:6px;}
+  .save{font-size:11px; padding:6px 9px;}
+  .save svg{width:11px; height:11px;}
+}
 
 .next-label{font-family:'Inter',sans-serif; font-size:11.5px; letter-spacing:1.5px; text-transform:uppercase; color:var(--ink-soft); margin:0 0 13px;}
 

@@ -27,9 +27,14 @@ function browserTimezone() {
   }
 }
 
-export default function Settings({ onDone }) {
+// Server-side clamps, mirrored so the editor never promises what a save
+// would silently trim (email_.py caps topics at 15 entries of 80 chars).
+const MAX_TOPICS = 15;
+const MAX_TOPIC_CHARS = 80;
+
+export default function Settings({ onDone, onPrefsSaved }) {
   const [prefs, setPrefs] = useState(null);
-  const [topicsText, setTopicsText] = useState('');
+  const [draft, setDraft] = useState(''); // the tag being typed
   const [status, setStatus] = useState(null); // {kind:'bad'|'good', text}
   const [busy, setBusy] = useState(false);
 
@@ -42,7 +47,6 @@ export default function Settings({ onDone }) {
         const p = { ...DEFAULTS, ...(r.prefs || r) };
         p.topics = Array.isArray(p.topics) ? p.topics : [];
         setPrefs(p);
-        setTopicsText(p.topics.join('\n'));
       })
       .catch((e) => {
         if (!live) return;
@@ -59,14 +63,38 @@ export default function Settings({ onDone }) {
     setStatus(null);
   }
 
+  function addTopic() {
+    const t = draft.trim().slice(0, MAX_TOPIC_CHARS);
+    if (!t || !prefs) return;
+    if (prefs.topics.length >= MAX_TOPICS) return;
+    // Case-insensitive dedupe: "Old Maps" and "old maps" are one interest.
+    if (prefs.topics.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      setDraft('');
+      return;
+    }
+    set('topics', [...prefs.topics, t]);
+    setDraft('');
+  }
+
+  function removeTopic(topic) {
+    set('topics', prefs.topics.filter((t) => t !== topic));
+  }
+
   async function save() {
     if (busy || !prefs) return;
     setBusy(true);
     setStatus(null);
-    const topics = topicsText
-      .split('\n')
-      .map((t) => t.trim())
-      .filter(Boolean);
+    // A typed-but-unadded tag still counts — losing it on save is the kind
+    // of thing that teaches people to distrust forms.
+    const pending = draft.trim();
+    const topics = [...prefs.topics];
+    if (
+      pending &&
+      topics.length < MAX_TOPICS &&
+      !topics.some((x) => x.toLowerCase() === pending.toLowerCase())
+    ) {
+      topics.push(pending.slice(0, MAX_TOPIC_CHARS));
+    }
     const body = {
       enabled: !!prefs.enabled,
       topics,
@@ -80,8 +108,9 @@ export default function Settings({ onDone }) {
       // The server echoes what it stored (it clamps the hour and the frequency).
       const stored = r && 'enabled' in r ? r : body;
       setPrefs((p) => ({ ...p, ...stored }));
-      if (Array.isArray(stored.topics)) setTopicsText(stored.topics.join('\n'));
+      setDraft('');
       setStatus({ kind: 'good', text: 'Saved.' });
+      if (onPrefsSaved) onPrefsSaved(); // home's topical doors refresh to match
     } catch (e) {
       setStatus({ kind: 'bad', text: e.message || "That didn't save." });
     } finally {
@@ -123,20 +152,64 @@ export default function Settings({ onDone }) {
       </label>
 
       <div className="field">
-        <label className="flabel" htmlFor="curio-topics">
+        <label className="flabel" htmlFor="curio-topic-input">
           Things you're curious about
         </label>
-        <textarea
-          id="curio-topics"
-          className="finput"
-          value={topicsText}
-          onChange={(e) => {
-            setTopicsText(e.target.value);
-            setStatus(null);
-          }}
-          placeholder={'deep sea biology\nthe history of maps\nhow bridges stay up'}
-        />
-        <p className="fhelp">One per line. Leave it empty and Curio will range widely on its own.</p>
+        {prefs.topics.length > 0 && (
+          <div className="tag-row">
+            {prefs.topics.map((t) => (
+              <span className="tag" key={t}>
+                {t}
+                <button
+                  type="button"
+                  className="tag-x"
+                  onClick={() => removeTopic(t)}
+                  aria-label={`Remove ${t}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="tag-add">
+          <input
+            id="curio-topic-input"
+            className="finput"
+            type="text"
+            value={draft}
+            maxLength={MAX_TOPIC_CHARS}
+            disabled={prefs.topics.length >= MAX_TOPICS}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setStatus(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addTopic();
+              }
+            }}
+            placeholder={
+              prefs.topics.length >= MAX_TOPICS
+                ? 'That is plenty — remove one to add another.'
+                : prefs.topics.length
+                  ? 'Add another…'
+                  : 'e.g. deep sea biology'
+            }
+          />
+          <button
+            type="button"
+            className="btn ghost tag-add-btn"
+            onClick={addTopic}
+            disabled={!draft.trim() || prefs.topics.length >= MAX_TOPICS}
+          >
+            Add
+          </button>
+        </div>
+        <p className="fhelp">
+          Press Enter or Add after each one. Leave it empty and Curio will range widely on its own.
+        </p>
       </div>
 
       <label className="check">

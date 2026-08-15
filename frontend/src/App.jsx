@@ -70,7 +70,7 @@ export default function App() {
         )}
         {resolved === 'settings' &&
           (user ? (
-            <Settings onDone={() => goToCrumb(-1)} />
+            <Settings onDone={() => goToCrumb(-1)} onPrefsSaved={w.refreshTopicalSeeds} />
           ) : (
             <div className="panel">
               <h2>Doors in your inbox</h2>

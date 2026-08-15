@@ -71,6 +71,7 @@ export function useWander(user) {
   const topicalSeenRef = useRef(new Set());
   const topicalRefillingRef = useRef(false);
   const topicalShufflesRef = useRef(0);
+  const topicalLastTryRef = useRef(0); // throttles the return-home retry
   const topicalSeedsRef = useRef(topicalSeeds);
   topicalSeedsRef.current = topicalSeeds;
   const idRef = useRef(0); // unique ids for tree nodes
@@ -154,6 +155,19 @@ export function useWander(user) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, signedIn]);
+
+  // The row must not depend on one call at sign-in succeeding — free models
+  // fail routinely, and a session-long blank row for one flaky call reads as
+  // a broken feature. Coming back to home retries quietly: at most once per
+  // half minute, never while a load is in flight, free when no topics exist
+  // (the server answers empty before the quota gate).
+  useEffect(() => {
+    if (view !== 'home' || !signedIn) return;
+    if (topicalSeedsRef.current.length || topicalRefillingRef.current) return;
+    if (Date.now() - topicalLastTryRef.current < 30000) return;
+    loadTopicalSeeds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, signedIn]);
 
   // ── server mirror helpers ──────────────────────────────────
 
@@ -324,6 +338,7 @@ export function useWander(user) {
   async function loadTopicalSeeds(stillLive = () => true) {
     if (topicalRefillingRef.current) return;
     topicalRefillingRef.current = true;
+    topicalLastTryRef.current = Date.now();
     try {
       const exclude = [...dealtRef.current].slice(-RECENT_EXCLUDE);
       const j = await api.generateTopicalSeeds({ count: 6, exclude });
@@ -342,6 +357,17 @@ export function useWander(user) {
     } finally {
       topicalRefillingRef.current = false;
     }
+  }
+
+  // Settings saved (topics may have changed): forget the old pool and deal a
+  // fresh hand, so the row reflects the new interests without a page reload.
+  function refreshTopicalSeeds() {
+    topicalPoolRef.current = [];
+    topicalSeenRef.current = new Set();
+    topicalShufflesRef.current = 0;
+    topicalLastTryRef.current = 0; // let the reload happen immediately
+    setTopicalSeeds([]);
+    loadTopicalSeeds();
   }
 
   async function maybeRefillTopicalPool(force = false) {
@@ -742,6 +768,7 @@ export function useWander(user) {
     // actions
     shuffleDoors,
     shuffleTopicalDoors,
+    refreshTopicalSeeds,
     openPage,
     goToCrumb,
     openSaved,

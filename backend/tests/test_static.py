@@ -83,6 +83,35 @@ def test_the_real_favicon_is_in_the_committed_build():
     assert 'href="/favicon.svg"' in (dist / "index.html").read_text()
 
 
+def test_the_app_icons_are_in_the_committed_build():
+    """Home-screen and PWA icons: the manifest, every PNG it promises, and
+    the iOS touch icon must all be in dist, and index.html must point at
+    them — else 'Add to Home Screen' quietly falls back to a screenshot."""
+    import json as _json
+    import pathlib
+    import struct
+
+    dist = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    index = (dist / "index.html").read_text()
+    assert 'rel="manifest"' in index and "manifest.webmanifest" in index
+    assert 'rel="apple-touch-icon"' in index
+
+    manifest = _json.loads((dist / "manifest.webmanifest").read_text())
+    assert manifest["name"] == "Curio"
+    for entry in manifest["icons"]:
+        png = dist / entry["src"].lstrip("/")
+        assert png.exists(), f"{entry['src']} promised by manifest, missing from dist"
+        w, h = struct.unpack(">II", png.read_bytes()[16:24])
+        assert f"{w}x{h}" == entry["sizes"], f"{entry['src']} is {w}x{h}"
+
+    touch = dist / "apple-touch-icon.png"
+    assert touch.exists()
+    w, h = struct.unpack(">II", touch.read_bytes()[16:24])
+    assert (w, h) == (180, 180)
+    # The master the PNGs are rendered from ships too.
+    assert (dist / "icon.svg").exists()
+
+
 def test_api_paths_do_not_fall_through_to_the_spa(built_app):
     """An unknown /api/* must be a JSON 404, not an HTML page."""
     r = built_app.test_client().get("/api/definitely-not-real")

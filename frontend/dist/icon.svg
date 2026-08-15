@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="100%" height="100%">
+  <!-- The app icon master: the brand's door on a full-bleed paper canvas.
+       No transparency (spec: the OS rounds and masks the square itself), and
+       the mark sits inside the central safe zone so a circular mask can crop
+       ~20% off every edge without touching it. Colors are fixed — app icons
+       don't adapt to dark mode; paper is the brand on any shelf.
+       PNG exports are rendered from this file at build time (headless
+       Chromium screenshot); edit here, re-export, never edit the PNGs. -->
+  <rect width="1024" height="1024" fill="#F4F2EB" />
+  <path d="M 382 237 H 502 A 200 200 0 0 1 702 437 V 587 A 200 200 0 0 1 502 787 H 382 A 60 60 0 0 1 322 727 V 297 A 60 60 0 0 1 382 237 Z"
+        fill="none" stroke="#1C2B3A" stroke-width="52" stroke-linejoin="round" />
+  <!-- Knob oversized relative to the header mark on purpose: at 32px a
+       proportional knob disappears, and a door with no knob is a blob. -->
+  <circle cx="590" cy="501" r="58" fill="#A9781F" />
+</svg>

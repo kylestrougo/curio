@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as api from '../api.js';
 import Loading from '../components/Loading.jsx';
 
@@ -32,11 +32,33 @@ function browserTimezone() {
 const MAX_TOPICS = 15;
 const MAX_TOPIC_CHARS = 80;
 
+// The PUT body for a given prefs state — also the shape we diff to decide
+// whether anything is actually unsaved.
+function bodyFor(prefs, topics) {
+  return {
+    enabled: !!prefs.enabled,
+    topics,
+    wildcard: !!prefs.wildcard,
+    sendHour: Number(prefs.sendHour),
+    frequency: prefs.frequency,
+    timezone: browserTimezone(),
+  };
+}
+
+const AUTOSAVE_DELAY = 1000;
+
 export default function Settings({ onDone, onPrefsSaved }) {
   const [prefs, setPrefs] = useState(null);
   const [draft, setDraft] = useState(''); // the tag being typed
   const [status, setStatus] = useState(null); // {kind:'bad'|'good', text}
-  const [busy, setBusy] = useState(false);
+
+  // Autosave plumbing. savedRef holds the last server-acknowledged body;
+  // anything that differs from it is unsaved and gets flushed after a quiet
+  // second. seqRef makes the latest save win — a slow, stale response must
+  // never overwrite state from a newer edit.
+  const savedRef = useRef(null);
+  const timerRef = useRef(null);
+  const seqRef = useRef(0);
 
   useEffect(() => {
     let live = true;
@@ -46,6 +68,7 @@ export default function Settings({ onDone, onPrefsSaved }) {
         if (!live) return;
         const p = { ...DEFAULTS, ...(r.prefs || r) };
         p.topics = Array.isArray(p.topics) ? p.topics : [];
+        savedRef.current = bodyFor(p, p.topics);
         setPrefs(p);
       })
       .catch((e) => {
@@ -55,12 +78,57 @@ export default function Settings({ onDone, onPrefsSaved }) {
       });
     return () => {
       live = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
+  async function doSave(current) {
+    const body = bodyFor(current, [...current.topics]);
+    const sentJson = JSON.stringify(body);
+    const seq = ++seqRef.current;
+    const topicsBefore = JSON.stringify(savedRef.current ? savedRef.current.topics : null);
+    setStatus({ kind: 'good', text: 'Saving…' });
+    try {
+      const r = await api.putEmailPrefs(body);
+      if (seq !== seqRef.current) return; // a newer save is in charge now
+      // The server echoes what it stored (it clamps the hour and the frequency).
+      const stored = r && 'enabled' in r ? r : body;
+      savedRef.current = bodyFor(stored, Array.isArray(stored.topics) ? stored.topics : body.topics);
+      // Apply the echo only if the user hasn't edited since this save left —
+      // otherwise keep their newer state, which the dirty-check will re-save.
+      setPrefs((p) =>
+        JSON.stringify(bodyFor(p, p.topics)) === sentJson ? { ...p, ...stored } : p
+      );
+      setStatus({ kind: 'good', text: 'Saved.' });
+      // Regenerating the home row costs a real generation — only worth it
+      // when the interests themselves changed, not for hour/wildcard tweaks.
+      if (onPrefsSaved && JSON.stringify(savedRef.current.topics) !== topicsBefore) {
+        onPrefsSaved();
+      }
+    } catch (e) {
+      if (seq !== seqRef.current) return;
+      // Prefs stay dirty; the next edit (or leaving the page) retries.
+      setStatus({ kind: 'bad', text: e.message || "That didn't save." });
+    }
+  }
+
+  // Any settings change settles into a save after a quiet moment. Typing in
+  // the tag input edits `draft`, not `prefs`, so keystrokes never land here —
+  // only committed tags and toggles do.
+  useEffect(() => {
+    if (!prefs || savedRef.current == null) return;
+    const dirty =
+      JSON.stringify(bodyFor(prefs, prefs.topics)) !== JSON.stringify(savedRef.current);
+    if (!dirty) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => doSave(prefs), AUTOSAVE_DELAY);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [prefs]);
+
   function set(key, value) {
     setPrefs((p) => ({ ...p, [key]: value }));
-    setStatus(null);
   }
 
   function addTopic() {
@@ -80,42 +148,31 @@ export default function Settings({ onDone, onPrefsSaved }) {
     set('topics', prefs.topics.filter((t) => t !== topic));
   }
 
-  async function save() {
-    if (busy || !prefs) return;
-    setBusy(true);
-    setStatus(null);
-    // A typed-but-unadded tag still counts — losing it on save is the kind
-    // of thing that teaches people to distrust forms.
-    const pending = draft.trim();
-    const topics = [...prefs.topics];
-    if (
-      pending &&
-      topics.length < MAX_TOPICS &&
-      !topics.some((x) => x.toLowerCase() === pending.toLowerCase())
-    ) {
-      topics.push(pending.slice(0, MAX_TOPIC_CHARS));
+  // Leaving the page: a typed-but-unadded tag still counts — losing it on
+  // the way out is the kind of thing that teaches people to distrust forms.
+  // Fold it in and flush any unsaved state right now; the request outlives
+  // the unmount.
+  function leave() {
+    if (prefs) {
+      const pending = draft.trim();
+      const topics = [...prefs.topics];
+      if (
+        pending &&
+        topics.length < MAX_TOPICS &&
+        !topics.some((x) => x.toLowerCase() === pending.toLowerCase())
+      ) {
+        topics.push(pending.slice(0, MAX_TOPIC_CHARS));
+      }
+      const final = { ...prefs, topics };
+      if (
+        savedRef.current == null ||
+        JSON.stringify(bodyFor(final, topics)) !== JSON.stringify(savedRef.current)
+      ) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        doSave(final);
+      }
     }
-    const body = {
-      enabled: !!prefs.enabled,
-      topics,
-      wildcard: !!prefs.wildcard,
-      sendHour: Number(prefs.sendHour),
-      frequency: prefs.frequency,
-      timezone: browserTimezone(),
-    };
-    try {
-      const r = await api.putEmailPrefs(body);
-      // The server echoes what it stored (it clamps the hour and the frequency).
-      const stored = r && 'enabled' in r ? r : body;
-      setPrefs((p) => ({ ...p, ...stored }));
-      setDraft('');
-      setStatus({ kind: 'good', text: 'Saved.' });
-      if (onPrefsSaved) onPrefsSaved(); // home's topical doors refresh to match
-    } catch (e) {
-      setStatus({ kind: 'bad', text: e.message || "That didn't save." });
-    } finally {
-      setBusy(false);
-    }
+    onDone();
   }
 
   if (!prefs) {
@@ -180,10 +237,7 @@ export default function Settings({ onDone, onPrefsSaved }) {
             value={draft}
             maxLength={MAX_TOPIC_CHARS}
             disabled={prefs.topics.length >= MAX_TOPICS}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setStatus(null);
-            }}
+            onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -263,13 +317,11 @@ export default function Settings({ onDone, onPrefsSaved }) {
       </div>
 
       <div className="btnrow">
-        <button className="btn" onClick={save} disabled={busy}>
-          {busy ? 'Saving…' : 'Save preferences'}
-        </button>
-        <button className="btn ghost" onClick={onDone} disabled={busy}>
+        <button className="btn ghost" onClick={leave}>
           Back to the doors
         </button>
       </div>
+      <p className="fhelp">Changes save themselves — there's nothing to submit.</p>
 
       <p className="note">
         Every email carries a one-click unsubscribe, honoured the moment you tap it. No open

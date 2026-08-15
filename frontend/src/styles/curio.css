@@ -80,9 +80,10 @@ body { margin: 0; background: #F4F2EB; }
 .qa .q{font-family:'Inter',sans-serif; font-size:13px; font-weight:600; color:var(--brass);
   letter-spacing:.2px; margin:0 0 5px;}
 .qa .a{font-size:16.5px; line-height:1.55; margin:0;}
-.save-row{display:flex; align-items:center; gap:12px; margin-bottom:30px;}
+.save-row{display:flex; align-items:center; gap:12px; row-gap:10px; flex-wrap:wrap; margin-bottom:30px;}
 .save{font-family:'Inter',sans-serif; font-size:13px; font-weight:500; cursor:pointer;
   display:inline-flex; align-items:center; gap:7px; padding:8px 15px; border-radius:999px;
+  white-space:nowrap;
   background:none; border:1px solid var(--line); color:var(--ink-soft); transition:all .16s;}
 .save:hover{border-color:var(--brass); color:var(--ink);}
 .save.on{background:var(--brass); border-color:var(--brass); color:#FBFAF6;}

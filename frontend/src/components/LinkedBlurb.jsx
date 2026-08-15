@@ -20,6 +20,46 @@ function findSpans(text, terms) {
   return spans.sort((a, b) => a[0] - b[0]);
 }
 
+// Deeper prose (tell-me-more, Q&A answers) carries its links inline instead:
+// the model wraps terms in [[double brackets]] as it writes. Complete pairs
+// become termlinks (capped at 4, like the blurb); a trailing unclosed
+// "[[fragment" mid-stream renders as its bare words so brackets never flash
+// on screen; text with no markers renders exactly as before.
+export function MarkedProse({ text, onOpen, className }) {
+  if (!text || !text.includes('[[')) return <p className={className}>{text}</p>;
+
+  const parts = [];
+  let cursor = 0;
+  let links = 0;
+  while (cursor < text.length) {
+    const open = text.indexOf('[[', cursor);
+    if (open === -1) {
+      parts.push(text.slice(cursor));
+      break;
+    }
+    if (open > cursor) parts.push(text.slice(cursor, open));
+    const close = text.indexOf(']]', open + 2);
+    if (close === -1) {
+      // Mid-stream: the marker hasn't closed yet — show the words, not the brackets.
+      parts.push(text.slice(open + 2));
+      break;
+    }
+    const term = text.slice(open + 2, close).trim();
+    if (term && links < 4) {
+      links += 1;
+      parts.push(
+        <button type="button" className="termlink" key={open} onClick={() => onOpen(term)}>
+          {text.slice(open + 2, close)}
+        </button>
+      );
+    } else {
+      parts.push(text.slice(open + 2, close));
+    }
+    cursor = close + 2;
+  }
+  return <p className={className}>{parts}</p>;
+}
+
 export default function LinkedBlurb({ text, terms, onOpen, className = 'blurb' }) {
   const spans = Array.isArray(terms) && terms.length ? findSpans(text, terms) : [];
   if (!spans.length) return <p className={className}>{text}</p>;

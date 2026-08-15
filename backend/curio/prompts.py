@@ -181,12 +181,24 @@ def page(label, kind, path: list[str], surprise: bool, exclude: list[str]) -> tu
     return system, user
 
 
+# Deeper prose carries its term links inline: the model brackets terms as it
+# writes, and the client turns complete pairs into tap-to-wander links (the
+# page blurb can't use this — it predates streaming as a JSON field and gets
+# a verified `terms` array instead). One constant shared by all four prose
+# prompts so the marker syntax can never drift between them.
+_MARK_TERMS = (
+    "Wrap the 2-4 names, organizations, or technical terms most worth exploring "
+    "further in double square brackets, like [[Fritz Haber]] — exactly as they "
+    "appear in your sentence, no other brackets or markup anywhere."
+)
+
+
 def more(title: str, said: str) -> tuple[str, str]:
     system = (
         PERSONA + " " + _JSON_RULE
         + '{"more": "3-4 vivid accurate sentences"}. '
         "Go one level deeper on the page — new detail, mechanism, or story. "
-        "Do not repeat anything already said."
+        "Do not repeat anything already said. " + _MARK_TERMS
     )
     return system, f'Page: "{title}".\nAlready said: {said}\nTell me more.'
 
@@ -196,7 +208,7 @@ def ask(title: str, said: str, question: str) -> tuple[str, str]:
         PERSONA + " " + _JSON_RULE
         + '{"answer": "2-4 clear accurate sentences"}. '
         "Answer the user's follow-up question in the context of the page. "
-        "If you do not know, say so plainly instead of guessing."
+        "If you do not know, say so plainly instead of guessing. " + _MARK_TERMS
     )
     return system, f'Page: "{title}".\nPage says: {said}\nFollow-up question: {question}'
 
@@ -214,7 +226,7 @@ def more_prose(title: str, said: str) -> tuple[str, str]:
         + " Respond with ONLY the prose of your answer — no JSON, no markdown, no preamble. "
         "Write 3-4 vivid accurate sentences. "
         "Go one level deeper on the page — new detail, mechanism, or story. "
-        "Do not repeat anything already said."
+        "Do not repeat anything already said. " + _MARK_TERMS
     )
     return system, f'Page: "{title}".\nAlready said: {said}\nTell me more.'
 
@@ -225,7 +237,7 @@ def ask_prose(title: str, said: str, question: str) -> tuple[str, str]:
         + " Respond with ONLY the prose of your answer — no JSON, no markdown, no preamble. "
         "Write 2-4 clear accurate sentences. "
         "Answer the user's follow-up question in the context of the page. "
-        "If you do not know, say so plainly instead of guessing."
+        "If you do not know, say so plainly instead of guessing. " + _MARK_TERMS
     )
     return system, f'Page: "{title}".\nPage says: {said}\nFollow-up question: {question}'
 

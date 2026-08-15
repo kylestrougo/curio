@@ -125,3 +125,28 @@ class TestAntiFabrication:
         joined = " ".join(prompts._ANGLES)
         assert "a person whose name has been forgotten" not in joined
         assert "real, documented person" in joined
+
+
+class TestTermMarkers:
+    """Deeper prose carries its tap-to-wander links as inline [[term]] markers.
+
+    The client's parser is the only consumer, so the contract lives in the
+    prompt wording: all four prose prompts (streaming and JSON fallback alike)
+    must ask for the same marker syntax — a stream failure that falls back to
+    JSON must not silently lose the links."""
+
+    def test_all_four_prose_prompts_ask_for_markers(self):
+        for system in (
+            prompts.more("T", "said")[0],
+            prompts.ask("T", "said", "q?")[0],
+            prompts.more_prose("T", "said")[0],
+            prompts.ask_prose("T", "said", "q?")[0],
+        ):
+            assert "[[Fritz Haber]]" in system
+            assert "double square brackets" in system
+
+    def test_page_blurb_does_not_use_markers(self):
+        # The blurb's links come from the verified terms array instead;
+        # markers leaking into the blurb prompt would render as raw brackets.
+        system, _ = prompts.page("label", "topic", [], False, [])
+        assert "[[" not in system

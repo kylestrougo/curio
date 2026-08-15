@@ -172,6 +172,15 @@ class TestGeneration:
         body = client.post("/api/page", json={"label": "y", "kind": "topic"}).get_json()
         assert body["terms"] == []
 
+    def test_more_passes_term_markers_through_untouched(self, client, monkeypatch):
+        """[[term]] markers in deeper prose are the client's contract — the
+        server must never strip or mangle them."""
+        import json as _json
+        marked = "It was [[Fritz Haber]] who made air into bread."
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: _json.dumps({"more": marked}))
+        body = client.post("/api/more", json={"title": "T", "said": "s"}).get_json()
+        assert body["more"] == marked
+
     def test_seeds(self, client, stub_llm):
         r = client.post("/api/seeds", json={"count": 4})
         assert r.status_code == 200

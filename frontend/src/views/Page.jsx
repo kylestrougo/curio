@@ -1,6 +1,6 @@
 import Door from '../components/Door.jsx';
 import AskBox from '../components/AskBox.jsx';
-import LinkedBlurb from '../components/LinkedBlurb.jsx';
+import LinkedBlurb, { MarkedProse } from '../components/LinkedBlurb.jsx';
 import Loading from '../components/Loading.jsx';
 import StagedLoading from '../components/StagedLoading.jsx';
 
@@ -76,12 +76,19 @@ export default function Page({ w }) {
             onOpen={(t) => openPage(t, 'topic')}
           />
           {(current.more || []).map((m, i) => (
-            <p className="blurb deeper" key={i}>
-              {m}
-            </p>
+            <MarkedProse
+              className="blurb deeper"
+              key={i}
+              text={m}
+              onOpen={(t) => openPage(t, 'topic')}
+            />
           ))}
           {streamingMore !== null && (
-            <p className="blurb deeper streaming">{streamingMore || '…'}</p>
+            <MarkedProse
+              className="blurb deeper streaming"
+              text={streamingMore || '…'}
+              onOpen={(t) => openPage(t, 'topic')}
+            />
           )}
           <div className="save-row">
             <button className={'save' + (isSaved ? ' on' : '')} onClick={toggleSave}>
@@ -98,14 +105,18 @@ export default function Page({ w }) {
               {(current.qa || []).map((x, i) => (
                 <div className="qa" key={i}>
                   <p className="q">{x.q}</p>
-                  <p className="a">{x.a}</p>
+                  <MarkedProse className="a" text={x.a} onOpen={(t) => openPage(t, 'topic')} />
                 </div>
               ))}
               {streamingQa && (
                 <div className="qa">
                   <p className="q">{streamingQa.q}</p>
                   {streamingQa.a ? (
-                    <p className="a streaming">{streamingQa.a}</p>
+                    <MarkedProse
+                      className="a streaming"
+                      text={streamingQa.a}
+                      onOpen={(t) => openPage(t, 'topic')}
+                    />
                   ) : (
                     <Loading style={{ padding: '10px 2px' }}>Thinking it over…</Loading>
                   )}

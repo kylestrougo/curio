@@ -541,7 +541,9 @@ export function useWander(user) {
       // Streams into a provisional paragraph as tokens arrive; the finished
       // text is then committed to the page like the non-streaming path did.
       const text = await api.streamMore(
-        { title, said: [blurb, ...more].join(' ') },
+        // Stored more-paragraphs carry [[term]] markers for the links; the
+        // model shouldn't see its own markup echoed back as context.
+        { title, said: [blurb, ...more].join(' ').replace(/\[\[|\]\]/g, '') },
         (_chunk, full) => setStreamingMore(full)
       );
       if (text) {
@@ -566,7 +568,7 @@ export function useWander(user) {
     setStreamingQa({ q, a: '' });
     try {
       const answer = await api.streamAsk(
-        { title, said: [blurb, ...more].join(' '), question: q },
+        { title, said: [blurb, ...more].join(' ').replace(/\[\[|\]\]/g, ''), question: q },
         (_chunk, full) => setStreamingQa({ q, a: full })
       );
       if (answer) {

@@ -78,6 +78,21 @@ CREATE TABLE IF NOT EXISTS door_tokens (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One tap of the share button, frozen. The link shows exactly this page —
+-- title, blurb, any tell-me-more and Q&A — to anyone, with no LLM call.
+CREATE TABLE IF NOT EXISTS shared_pages (
+    token        TEXT PRIMARY KEY,
+    user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    kind         TEXT,
+    title        TEXT NOT NULL,
+    blurb        TEXT NOT NULL DEFAULT '',
+    more_json    TEXT NOT NULL DEFAULT '[]',
+    qa_json      TEXT NOT NULL DEFAULT '[]',
+    buttons_json TEXT NOT NULL DEFAULT '[]',
+    terms_json   TEXT NOT NULL DEFAULT '[]',
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Which free models are actually behaving this week. Drives the admin page.
 CREATE TABLE IF NOT EXISTS model_stats (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

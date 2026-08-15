@@ -57,6 +57,7 @@ export function useWander(user) {
   const [streamingMore, setStreamingMore] = useState(null); // prose arriving token by token
   const [streamingQa, setStreamingQa] = useState(null); // {q, a} arriving token by token
   const [streamingBlurb, setStreamingBlurb] = useState(''); // page blurb arriving as the door opens
+  const [shareState, setShareState] = useState('idle'); // idle | busy | copied
 
   const scrollRef = useRef(null);
   const reqId = useRef(0); // ignore stale in-flight responses
@@ -90,8 +91,11 @@ export function useWander(user) {
     if (didInit.current) return;
     didInit.current = true;
     loadSeeds();
-    const token = new URLSearchParams(window.location.search).get('door');
-    if (token) openDoorToken(token);
+    const params = new URLSearchParams(window.location.search);
+    const door = params.get('door');
+    const share = params.get('share');
+    if (door) openDoorToken(door);
+    else if (share) openShareToken(share);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -476,6 +480,7 @@ export function useWander(user) {
     setFollowQ('');
     setMoreLoading(false);
     setQaLoading(false);
+    setShareState('idle');
   }
 
   function goToCrumb(i) {
@@ -739,6 +744,79 @@ export function useWander(user) {
     }
   }
 
+  // A shared link: /s/:token lands here as /?share=:token. The snapshot is
+  // shown exactly as it was frozen — no refetch, no persistence (like a
+  // saved page). Wandering onward from it works signed in or out.
+  async function openShareToken(token) {
+    const myReq = ++reqId.current;
+    setLoading(true);
+    setError(null);
+    setView('page');
+    try {
+      window.history.replaceState({}, '', window.location.pathname);
+    } catch {
+      /* the link still works without cleaning the URL */
+    }
+    try {
+      const p = await api.getShare(token);
+      if (myReq !== reqId.current) return;
+      if (!p || !p.title) {
+        setView('home');
+        return;
+      }
+      const page = {
+        nodeId: ++idRef.current,
+        parentId: null,
+        kind: p.kind || 'topic',
+        title: p.title,
+        blurb: p.blurb || '',
+        more: p.more || [],
+        qa: p.qa || [],
+        buttons: (p.buttons || []).slice(0, 5),
+        terms: (p.terms || []).slice(0, 4),
+      };
+      visitedRef.current.push(page);
+      setTrail([page]);
+    } catch (e) {
+      if (myReq !== reqId.current) return;
+      shrug('shared page', e);
+      setView('home');
+    } finally {
+      if (myReq === reqId.current) setLoading(false);
+    }
+  }
+
+  async function sharePage() {
+    if (!current || !signedIn || shareState === 'busy') return;
+    setShareState('busy');
+    try {
+      const { title, blurb, kind, more = [], qa = [], buttons = [], terms = [] } = current;
+      const r = await api.createShare({ title, blurb, kind, more, qa, buttons, terms });
+      // Built from the address bar, not the server — a stale PUBLIC_URL on
+      // the backend must never produce a link that points somewhere else.
+      const url = `${window.location.origin}/s/${r.token}`;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title, url });
+          setShareState('idle');
+          return;
+        } catch (e) {
+          if (e && e.name === 'AbortError') {
+            setShareState('idle'); // user closed the share sheet
+            return;
+          }
+          // Share sheet unavailable after all — fall through to the clipboard.
+        }
+      }
+      await navigator.clipboard.writeText(url);
+      setShareState('copied');
+      setTimeout(() => setShareState((s) => (s === 'copied' ? 'idle' : s)), 2000);
+    } catch (e) {
+      shrug('share', e);
+      setShareState('idle');
+    }
+  }
+
   const isSaved = !!(current && saved.some((p) => p.title === current.title));
 
   return {
@@ -765,6 +843,8 @@ export function useWander(user) {
     streamingBlurb,
     streamingMore,
     streamingQa,
+    shareState,
+    signedIn,
     // refs the views read directly
     scrollRef,
     visitedRef,
@@ -782,6 +862,7 @@ export function useWander(user) {
     keepWandering,
     startFresh,
     toggleSave,
+    sharePage,
     submitAsk,
     setRecap,
     resumeWander,

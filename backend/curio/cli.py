@@ -32,10 +32,11 @@ def housekeeping_command():
     counters = prune_counters(keep_days=7)
     execute("DELETE FROM model_stats WHERE created_at < datetime('now', '-30 days')")
     execute("DELETE FROM door_tokens WHERE created_at < datetime('now', '-30 days')")
+    execute("DELETE FROM shared_pages WHERE created_at < datetime('now', '-90 days')")
     pages = pagecache.prune()
     click.echo(
         f"pruned {counters} rate-limit counters and {pages} cached pages; "
-        "stats and door tokens older than 30d removed"
+        "stats and door tokens older than 30d removed, share links older than 90d"
     )
 
 

@@ -26,7 +26,7 @@ def create_app(config_object=Config) -> Flask:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    from . import admin, api, auth, cli, db, email_
+    from . import admin, api, auth, cli, db, email_, share
 
     db.init_app(app)
     cli.init_app(app)
@@ -34,6 +34,7 @@ def create_app(config_object=Config) -> Flask:
     app.register_blueprint(api.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(email_.bp)
+    app.register_blueprint(share.bp)
 
     _register_frontend(app)
 

@@ -85,6 +85,8 @@ def test_boot_adds_timezone_to_an_existing_database(old_db_path):
     create_app(Cfg)  # boot runs init_db, which runs the guarded ALTERs
     assert "timezone" in _columns(old_db_path, "email_prefs")
     assert "terms_json" in _columns(old_db_path, "page_cache")
+    # Whole new tables need no ALTER — CREATE TABLE IF NOT EXISTS covers them.
+    assert "token" in _columns(old_db_path, "shared_pages")
 
     # Existing rows got the empty default (→ server default zone), unharmed.
     conn = sqlite3.connect(old_db_path)

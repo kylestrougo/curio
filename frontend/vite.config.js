@@ -17,6 +17,7 @@ export default defineConfig({
     proxy: {
       '/api': { target: backend, changeOrigin: false },
       '/d': { target: backend, changeOrigin: false },
+      '/s': { target: backend, changeOrigin: false },
       '/unsub': { target: backend, changeOrigin: false },
     },
   },

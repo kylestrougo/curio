@@ -4,6 +4,14 @@ import LinkedBlurb, { MarkedProse } from '../components/LinkedBlurb.jsx';
 import Loading from '../components/Loading.jsx';
 import StagedLoading from '../components/StagedLoading.jsx';
 
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 3v13M8 6.5 12 3l4 3.5M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    </svg>
+  );
+}
+
 function BookmarkIcon({ filled }) {
   return (
     <svg viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
@@ -35,6 +43,9 @@ export default function Page({ w }) {
     streamingBlurb,
     streamingMore,
     streamingQa,
+    sharePage,
+    shareState,
+    signedIn,
   } = w;
 
   return (
@@ -98,6 +109,16 @@ export default function Page({ w }) {
             <button className="save" onClick={tellMore} disabled={moreLoading}>
               {moreLoading ? 'Going deeper…' : 'Tell me more'}
             </button>
+            {signedIn && (
+              <button className="save" onClick={sharePage} disabled={shareState === 'busy'}>
+                <ShareIcon />
+                {shareState === 'busy'
+                  ? 'Sharing…'
+                  : shareState === 'copied'
+                    ? 'Link copied'
+                    : 'Share'}
+              </button>
+            )}
           </div>
 
           {((current.qa || []).length > 0 || qaLoading) && (

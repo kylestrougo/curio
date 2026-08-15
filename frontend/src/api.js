@@ -296,6 +296,16 @@ export function getDoor(token) {
   return request(`/api/door/${encodeURIComponent(token)}`);
 }
 
+// Snapshot share: freeze the current page, get a token for /s/:token. → { token, url }
+export function createShare(page) {
+  return request('/api/share', { method: 'POST', body: page });
+}
+
+// → { title, blurb, kind, more, qa, buttons, terms } — public, no login needed.
+export function getShare(token) {
+  return request(`/api/share/${encodeURIComponent(token)}`);
+}
+
 // ── Admin ────────────────────────────────────────────────────
 
 export function adminModels() {

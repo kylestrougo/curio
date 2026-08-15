@@ -144,6 +144,34 @@ class TestGeneration:
         assert client.post("/api/page", json={}).status_code == 400
         assert client.post("/api/page", json={"surprise": True}).status_code == 200
 
+    def test_page_terms_survive_only_if_the_blurb_says_them(self, client, monkeypatch):
+        """Terms become tap-to-wander links, so each must be a verbatim
+        (case-insensitive) substring of the blurb — anything else is either
+        the model paraphrasing or inventing, and both get dropped. So do
+        duplicates and the page's own title."""
+        import json as _json
+        payload = {
+            "title": "Radium",
+            "blurb": "The Radium Girls painted dials for the United States Radium Corporation.",
+            "buttons": [{"label": f"d{i}", "type": "fact"} for i in range(5)],
+            "terms": [
+                "radium girls",                        # in blurb (case differs) — kept
+                "United States Radium Corporation",    # in blurb — kept
+                "Marie Curie",                         # never in the blurb — dropped
+                "RADIUM GIRLS",                        # duplicate of the first — dropped
+                "Radium",                              # equals the title — dropped
+                {"label": "not a string"},             # wrong shape — dropped
+            ],
+        }
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: _json.dumps(payload))
+        body = client.post("/api/page", json={"label": "x", "kind": "topic"}).get_json()
+        assert body["terms"] == ["radium girls", "United States Radium Corporation"]
+
+    def test_page_without_terms_still_works(self, client, stub_llm):
+        # Free models will forget the key constantly; the page must not care.
+        body = client.post("/api/page", json={"label": "y", "kind": "topic"}).get_json()
+        assert body["terms"] == []
+
     def test_seeds(self, client, stub_llm):
         r = client.post("/api/seeds", json={"count": 4})
         assert r.status_code == 200

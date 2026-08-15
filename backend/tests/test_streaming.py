@@ -149,7 +149,10 @@ PAGE_JSON_CHUNKS = [
     'ight lines are unstable.", "buttons": [',
     '{"label": "d1", "type": "fact"}, {"label": "d2", "type": "topic"},',
     '{"label": "d3", "type": "question"}, {"label": "d4", "type": "fact"},',
-    '{"label": "d5", "type": "topic"}]}',
+    '{"label": "d5", "type": "topic"}],',
+    # One real term and one the model made up but never wrote in the blurb —
+    # the fabricated one must not survive to the done event.
+    ' "terms": ["straight lines", "the Coriolis effect"]}',
 ]
 
 
@@ -203,6 +206,8 @@ class TestPageStream:
         done = json.loads([d for e, d in frames if e == "done"][0])
         assert done["title"] == "Meanders"
         assert len(done["buttons"]) == 5
+        # Only the term the blurb actually contains becomes a link.
+        assert done["terms"] == ["straight lines"]
 
     def test_stream_populates_the_cache(self, client, app, monkeypatch):
         _stub_stream(monkeypatch, {"m": PAGE_JSON_CHUNKS})

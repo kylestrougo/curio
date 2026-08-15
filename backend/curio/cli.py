@@ -290,7 +290,12 @@ def warm_cache_command(limit):
             failures += 1
             click.echo(f"  ✗ {label} — page came back empty")
             continue
-        pagecache.store_page(label, kind, title, blurb, buttons)
+        terms = [
+            str(t).strip()[:80]
+            for t in (parsed.get("terms") or [])
+            if isinstance(t, str) and t.strip() and t.strip().lower() in blurb.lower()
+        ][:4]
+        pagecache.store_page(label, kind, title, blurb, buttons, terms)
         warmed += 1
         click.echo(f"  ✓ {label}")
 

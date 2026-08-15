@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS page_cache (
     title        TEXT NOT NULL,
     blurb        TEXT NOT NULL,
     buttons_json TEXT NOT NULL,
+    terms_json   TEXT NOT NULL DEFAULT '[]',    -- tap-to-wander terms inside the blurb
     model        TEXT,                           -- NULL when the live path didn't note it
     hits         INTEGER NOT NULL DEFAULT 0,
     created_at   TEXT NOT NULL DEFAULT (datetime('now'))

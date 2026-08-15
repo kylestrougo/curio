@@ -1,5 +1,6 @@
 import Door from '../components/Door.jsx';
 import AskBox from '../components/AskBox.jsx';
+import LinkedBlurb from '../components/LinkedBlurb.jsx';
 import Loading from '../components/Loading.jsx';
 import StagedLoading from '../components/StagedLoading.jsx';
 
@@ -69,7 +70,11 @@ export default function Page({ w }) {
       ) : current ? (
         <>
           <h2>{current.title}</h2>
-          <p className="blurb">{current.blurb}</p>
+          <LinkedBlurb
+            text={current.blurb}
+            terms={current.terms}
+            onOpen={(t) => openPage(t, 'topic')}
+          />
           {(current.more || []).map((m, i) => (
             <p className="blurb deeper" key={i}>
               {m}

@@ -67,6 +67,13 @@ body { margin: 0; background: #F4F2EB; }
 .blurb{font-size:18.5px; line-height:1.6; margin:0 0 22px;}
 .blurb.deeper{margin-top:-6px; animation:fade .35s ease both;}
 
+/* key terms inside the blurb: doors disguised as words. Inherit everything
+   from the prose so only the brass underline gives them away. */
+.termlink{font:inherit; color:inherit; background:none; border:none; padding:0;
+  cursor:pointer; text-decoration:underline; text-decoration-color:var(--brass);
+  text-decoration-thickness:1.5px; text-underline-offset:3px; transition:color .15s;}
+.termlink:hover{color:var(--brass);}
+
 /* follow-up Q&A */
 .qa-list{margin:0 0 14px; border-left:2px solid var(--line); padding-left:16px;}
 .qa{margin:0 0 16px; animation:fade .35s ease both;}

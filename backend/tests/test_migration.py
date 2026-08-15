@@ -14,7 +14,8 @@ import pytest
 from curio import create_app
 from curio.config import Config
 
-# email_prefs exactly as it shipped, before the timezone column existed.
+# Tables exactly as they shipped, before the post-launch columns existed
+# (email_prefs.timezone, page_cache.terms_json).
 _V1_EMAIL_PREFS = """
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,6 +34,17 @@ CREATE TABLE email_prefs (
                 CHECK (frequency IN ('daily', 'weekdays', 'weekly')),
     unsub_token TEXT    NOT NULL UNIQUE,
     last_sent_on TEXT
+);
+CREATE TABLE page_cache (
+    cache_key    TEXT PRIMARY KEY,
+    label        TEXT NOT NULL,
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    blurb        TEXT NOT NULL,
+    buttons_json TEXT NOT NULL,
+    model        TEXT,
+    hits         INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """
 
@@ -72,6 +84,7 @@ def test_boot_adds_timezone_to_an_existing_database(old_db_path):
 
     create_app(Cfg)  # boot runs init_db, which runs the guarded ALTERs
     assert "timezone" in _columns(old_db_path, "email_prefs")
+    assert "terms_json" in _columns(old_db_path, "page_cache")
 
     # Existing rows got the empty default (→ server default zone), unharmed.
     conn = sqlite3.connect(old_db_path)

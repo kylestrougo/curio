@@ -90,6 +90,25 @@ class TestCacheReadWrite:
             assert query("SELECT hits FROM page_cache", (), one=True)["hits"] == 2
 
 
+class TestTerms:
+    def test_terms_round_trip_through_the_cache(self, app):
+        with app.app_context():
+            pagecache.store_page("radium", "topic", "Radium", "The Radium Girls.", [],
+                                 ["Radium Girls"])
+            assert pagecache.get_page("radium", "topic")["terms"] == ["Radium Girls"]
+
+    def test_rows_cached_before_terms_existed_still_serve(self, app):
+        """A legacy row (empty or mangled terms_json) is a page with no links,
+        never a cache miss."""
+        with app.app_context():
+            pagecache.store_page("old", "topic", "t", "b", [])
+            for legacy in ("", "not json", '{"not": "a list"}'):
+                execute("UPDATE page_cache SET terms_json = ?", (legacy,))
+                page = pagecache.get_page("old", "topic")
+                assert page["title"] == "t"
+                assert page["terms"] == []
+
+
 class TestPrune:
     def test_prune_removes_only_the_old(self, app):
         with app.app_context():

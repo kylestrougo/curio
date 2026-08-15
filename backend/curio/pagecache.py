@@ -38,7 +38,8 @@ def cache_key(label: str, kind: str) -> str:
 def get_page(label: str, kind: str) -> dict | None:
     """The cached page for this tap, or None. Counts the hit, best-effort."""
     row = query(
-        "SELECT label, kind, title, blurb, buttons_json FROM page_cache WHERE cache_key = ?",
+        "SELECT label, kind, title, blurb, buttons_json, terms_json "
+        "FROM page_cache WHERE cache_key = ?",
         (cache_key(label, kind),),
         one=True,
     )
@@ -48,6 +49,14 @@ def get_page(label: str, kind: str) -> dict | None:
         buttons = json.loads(row["buttons_json"])
     except (ValueError, TypeError):
         return None  # a corrupt row is a miss, not an error
+    # Rows cached before the terms column simply have none to link — the
+    # page is still perfectly good, so never turn that into a miss.
+    try:
+        terms = json.loads(row["terms_json"] or "[]")
+        if not isinstance(terms, list):
+            terms = []
+    except (ValueError, TypeError):
+        terms = []
     try:
         execute(
             "UPDATE page_cache SET hits = hits + 1 WHERE cache_key = ?",
@@ -55,18 +64,35 @@ def get_page(label: str, kind: str) -> dict | None:
         )
     except Exception:  # pragma: no cover - bookkeeping only
         log.warning("cache hit-count update failed for %r", label)
-    return {"title": row["title"], "blurb": row["blurb"], "buttons": buttons}
+    return {"title": row["title"], "blurb": row["blurb"], "buttons": buttons, "terms": terms}
 
 
-def store_page(label: str, kind: str, title: str, blurb: str, buttons: list, model: str | None = None) -> None:
+def store_page(
+    label: str,
+    kind: str,
+    title: str,
+    blurb: str,
+    buttons: list,
+    terms: list | None = None,
+    model: str | None = None,
+) -> None:
     execute(
-        "INSERT INTO page_cache (cache_key, label, kind, title, blurb, buttons_json, model) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO page_cache (cache_key, label, kind, title, blurb, buttons_json, terms_json, model) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(cache_key) DO UPDATE SET "
         "title = excluded.title, blurb = excluded.blurb, "
-        "buttons_json = excluded.buttons_json, model = excluded.model, "
-        "created_at = datetime('now')",
-        (cache_key(label, kind), label.strip(), kind, title, blurb, json.dumps(buttons), model),
+        "buttons_json = excluded.buttons_json, terms_json = excluded.terms_json, "
+        "model = excluded.model, created_at = datetime('now')",
+        (
+            cache_key(label, kind),
+            label.strip(),
+            kind,
+            title,
+            blurb,
+            json.dumps(buttons),
+            json.dumps(terms or []),
+            model,
+        ),
     )
 
 

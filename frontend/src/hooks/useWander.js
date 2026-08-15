@@ -455,6 +455,7 @@ export function useWander(user) {
         title: j.title || label || 'Somewhere unexpected',
         blurb: j.blurb || '',
         buttons: (j.buttons || []).slice(0, 5),
+        terms: (j.terms || []).slice(0, 4),
       };
       visitedRef.current.push(page);
       setTrail((t) => (resetTo !== null ? [page] : [...t, page]));

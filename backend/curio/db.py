@@ -50,6 +50,7 @@ def init_db() -> None:
     db.executescript(SCHEMA_PATH.read_text())
     # Columns added after first deploy (see _ensure_column):
     _ensure_column(db, "email_prefs", "timezone", "TEXT NOT NULL DEFAULT ''")
+    _ensure_column(db, "page_cache", "terms_json", "TEXT NOT NULL DEFAULT '[]'")
     db.commit()
 
 

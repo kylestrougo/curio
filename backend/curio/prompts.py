@@ -30,9 +30,15 @@ _JSON_RULE = "Respond with ONLY JSON, no markdown, no preamble, no code fences. 
 _PAGE_SHAPE = (
     _JSON_RULE + "Shaped exactly: "
     '{"title": string, "blurb": 2 vivid accurate sentences totaling under 45 words, '
-    '"buttons":[{"label": short enticing text max 8 words, "type":"fact"|"question"|"topic"}]}. '
+    '"buttons":[{"label": short enticing text max 8 words, "type":"fact"|"question"|"topic"}], '
+    '"terms":[2-4 strings]}. '
     "Return exactly 5 buttons that are a lively mix of surprising facts, provocative open questions, "
-    "and adjacent topics worth wandering into."
+    "and adjacent topics worth wandering into. "
+    # Terms become tap-to-wander links inside the blurb. The server drops any
+    # that don't appear verbatim, so "copied character-for-character" is load-
+    # bearing: a paraphrased term is an invisible link.
+    "The terms are the 2-4 names, organizations, or technical terms in the blurb most worth "
+    "a page of their own, each copied character-for-character from the blurb."
 )
 
 

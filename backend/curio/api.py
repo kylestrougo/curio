@@ -74,6 +74,31 @@ def _normalise_buttons(raw, limit: int = 5) -> list[dict]:
     return buttons
 
 
+def _normalise_terms(raw, blurb: str, title: str = "", limit: int = 4) -> list[str]:
+    """Key terms the blurb mentions, kept only if the blurb really says them.
+
+    The verbatim check is the anti-hallucination guard: a term the model
+    invented that isn't in its own prose can't be linked, so it's dropped.
+    """
+    if not isinstance(raw, list):
+        return []
+    haystack = blurb.lower()
+    seen = set()
+    terms = []
+    for item in raw:
+        term = _clean_text(item, 80) if isinstance(item, str) else ""
+        key = term.lower()
+        if not term or key in seen or key not in haystack:
+            continue
+        if title and key == title.strip().lower():
+            continue  # linking the page to itself helps nobody
+        seen.add(key)
+        terms.append(term)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
 def _normalise_seeds(raw) -> list[dict]:
     # Seeds allow up to 8 per request; the page-button cap of 5 was silently
     # trimming any bigger hand (a count=6 call really did return 5).
@@ -203,13 +228,14 @@ def page():
     blurb = _clean_text(parsed.get("blurb"), 1200)
     if not blurb:
         return _err("generation_failed", "The page came back empty. Try again.", 502)
+    terms = _normalise_terms(parsed.get("terms"), blurb, title)
     if not surprise:
         # Cached pages ignore the path context ("do not repeat recent steps"),
         # so a hit's buttons may point somewhere already visited. Accepted:
         # the page for a label is coherent from any approach, and keying on
         # path would gut the hit rate this exists for.
-        pagecache.store_page(label, kind, title, blurb, buttons)
-    return jsonify({"title": title, "blurb": blurb, "buttons": buttons})
+        pagecache.store_page(label, kind, title, blurb, buttons, terms)
+    return jsonify({"title": title, "blurb": blurb, "buttons": buttons, "terms": terms})
 
 
 @bp.post("/more")
@@ -453,9 +479,13 @@ def page_stream():
         if not blurb:
             yield f"event: error\ndata: {json.dumps('The page came back empty. Try again.')}\n\n"
             return
+        terms = _normalise_terms(parsed.get("terms"), blurb, title)
         if not surprise:
-            pagecache.store_page(label, kind, title, blurb, buttons)
-        yield f"event: done\ndata: {json.dumps({'title': title, 'blurb': blurb, 'buttons': buttons})}\n\n"
+            pagecache.store_page(label, kind, title, blurb, buttons, terms)
+        yield (
+            "event: done\n"
+            f"data: {json.dumps({'title': title, 'blurb': blurb, 'buttons': buttons, 'terms': terms})}\n\n"
+        )
 
     return Response(
         stream_with_context(events()),

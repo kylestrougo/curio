@@ -3,10 +3,10 @@ import * as api from '../api.js';
 import Loading from '../components/Loading.jsx';
 
 const DEFAULTS = {
-  enabled: false,
+  enabled: true,
   topics: [],
   wildcard: true,
-  sendHour: 8,
+  sendHour: 20,
   frequency: 'daily',
 };
 
@@ -188,8 +188,9 @@ export default function Settings({ onDone, onPrefsSaved }) {
     <div className="panel">
       <h2>Doors in your inbox</h2>
       <p className="sub">
-        If you'd like, Curio can send you a few doors to walk through — the same kind you'd find on
-        the home page, chosen around what you're curious about. Set nothing and nothing arrives.
+        Curio sends you a few doors to walk through each evening — the same kind you'd find on
+        the home page. Save what you're curious about below to steer them; leave it empty and
+        they're wildcards.
       </p>
 
       {status && <p className={'formnote ' + (status.kind === 'good' ? 'good' : 'bad')}>{status.text}</p>}

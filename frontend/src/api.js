@@ -325,6 +325,11 @@ export function adminTest({ model, intent }) {
   return request('/api/admin/test', { method: 'POST', body: { model, intent } });
 }
 
+// → { users: [{email, today, week, month}], timezone }
+export function adminUsage() {
+  return request('/api/admin/usage');
+}
+
 export function adminStats() {
   return request('/api/admin/stats');
 }

@@ -3,7 +3,8 @@
 Product constraint, from the brief, that governs every line here: this is an
 **invitation, not a hook**. Concretely that means:
 
-* Users who configure nothing get nothing. `enabled` defaults to 0.
+* Emails are on by default (8pm Eastern). A user with no saved topics gets
+  curated wildcard doors, never an LLM guess about who they are.
 * No open tracking pixels, no click tracking, no "we miss you" copy, no
   streaks, no escalating frequency.
 * One-click unsubscribe, no login required, honoured instantly.
@@ -26,7 +27,7 @@ from zoneinfo import ZoneInfo
 from flask import Blueprint, current_app, jsonify, redirect, request
 from flask_login import current_user, login_required
 
-from . import prompts
+from . import prompts, seedpool
 from .db import execute, query
 from .llm import LLMError, generate
 
@@ -81,7 +82,8 @@ def _prefs_row(user_id: int):
     row = query("SELECT * FROM email_prefs WHERE user_id = ?", (user_id,), one=True)
     if not row:
         execute(
-            "INSERT INTO email_prefs (user_id, enabled, unsub_token) VALUES (?, 0, ?)",
+            "INSERT INTO email_prefs (user_id, enabled, send_hour, timezone, unsub_token) "
+            "VALUES (?, 1, 20, 'America/New_York', ?)",
             (user_id, secrets.token_urlsafe(24)),
         )
         row = query("SELECT * FROM email_prefs WHERE user_id = ?", (user_id,), one=True)
@@ -122,8 +124,8 @@ def put_prefs():
             if isinstance(t, str) and t.strip():
                 topics.append(t.strip()[:80])
 
-    hour = data.get("sendHour", 8)
-    hour = hour if isinstance(hour, int) and 0 <= hour <= 23 else 8
+    hour = data.get("sendHour", 20)
+    hour = hour if isinstance(hour, int) and 0 <= hour <= 23 else 20
 
     frequency = data.get("frequency", "daily")
     frequency = frequency if frequency in FREQUENCIES else "daily"
@@ -197,7 +199,9 @@ def _make_door_token(user_id: int, label: str, kind: str) -> str:
     return token
 
 
-def _render(email: str, doors: list[dict], unsub_token: str) -> tuple[str, str]:
+def _render(
+    email: str, doors: list[dict], unsub_token: str, settings_note: bool = False
+) -> tuple[str, str]:
     base = current_app.config["PUBLIC_URL"]
     unsub_url = f"{base}/unsub/{unsub_token}"
 
@@ -206,6 +210,12 @@ def _render(email: str, doors: list[dict], unsub_token: str) -> tuple[str, str]:
         lines.append(f"  {d['label']}")
         lines.append(f"  {base}/d/{d['token']}")
         lines.append("")
+    if settings_note:
+        lines += [
+            "These are wildcards — save what you're curious about in settings "
+            f"to steer them: {base}/",
+            "",
+        ]
     lines += ["—", "Turn these off any time: " + unsub_url]
     text = "\n".join(lines)
 
@@ -225,7 +235,15 @@ def _render(email: str, doors: list[dict], unsub_token: str) -> tuple[str, str]:
         f"<ul style='list-style:none;padding:0;margin:0 0 28px;line-height:1.4'>{items}</ul>"
         "<p style='font-size:14px;color:#4A5A68;line-height:1.6;margin:0 0 24px'>"
         "Follow one, or none. They'll keep just as well tomorrow.</p>"
-        "<p style='font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#4A5A68'>"
+        + (
+            "<p style='font-size:14px;color:#4A5A68;line-height:1.6;margin:0 0 24px'>"
+            "These are wildcards — <a href='" + html.escape(base) + "/' "
+            "style='color:#A9781F'>save what you're curious about in settings</a> "
+            "to steer them.</p>"
+            if settings_note
+            else ""
+        )
+        + "<p style='font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#4A5A68'>"
         f"<a href='{html.escape(unsub_url)}' style='color:#4A5A68'>Stop these emails</a></p>"
         "</div></div>"
     )
@@ -341,18 +359,23 @@ def send_due_emails(force_user_id: int | None = None) -> dict:
         except (ValueError, TypeError):
             topics = []
 
-        system, user = prompts.email_doors(
-            topics, bool(prefs["wildcard"]), _last_thread(prefs["user_id"])
-        )
-        try:
-            parsed = generate(system, user, intent="email")
-        except LLMError as exc:
-            log.error("door generation failed for user %s: %s", prefs["user_id"], exc)
-            failed += 1
-            continue
+        if topics:
+            system, user = prompts.email_doors(
+                topics, bool(prefs["wildcard"]), _last_thread(prefs["user_id"])
+            )
+            try:
+                parsed = generate(system, user, intent="email")
+            except LLMError as exc:
+                log.error("door generation failed for user %s: %s", prefs["user_id"], exc)
+                failed += 1
+                continue
+            raw_seeds = parsed.get("seeds") or []
+        else:
+            # No saved interests: curated wildcards from the pool, no LLM call.
+            raw_seeds = seedpool.sample_doors(4)
 
         doors = []
-        for seed in (parsed.get("seeds") or [])[:4]:
+        for seed in raw_seeds[:4]:
             if not isinstance(seed, dict):
                 continue
             label = (seed.get("label") or "").strip()[:160]
@@ -367,7 +390,9 @@ def send_due_emails(force_user_id: int | None = None) -> dict:
             failed += 1
             continue
 
-        text, html_body = _render(prefs["email"], doors, prefs["unsub_token"])
+        text, html_body = _render(
+            prefs["email"], doors, prefs["unsub_token"], settings_note=not topics
+        )
         if _send(prefs["email"], "Doors for today", text, html_body):
             # The user's date, not UTC's — see the block comment up top.
             execute(

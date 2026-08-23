@@ -41,6 +41,7 @@ export default function Admin({ onDone }) {
   const [chain, setChain] = useState([]);
   const [overrides, setOverrides] = useState({});
   const [stats, setStats] = useState(null);
+  const [usage, setUsage] = useState(null);
   const [status, setStatus] = useState(null);
   const [busy, setBusy] = useState(false);
   const [loadErr, setLoadErr] = useState(null);
@@ -74,6 +75,10 @@ export default function Admin({ onDone }) {
       .adminStats()
       .then((r) => live && setStats(r.stats || r.models || []))
       .catch(() => live && setStats([]));
+    api
+      .adminUsage()
+      .then((r) => live && setUsage(r.users || []))
+      .catch(() => live && setUsage([]));
     return () => {
       live = false;
     };
@@ -339,6 +344,36 @@ export default function Admin({ onDone }) {
                   <td>{ms(pick(s, 'p50Ms', 'p50'))}</td>
                   <td>{ms(pick(s, 'p95Ms', 'p95'))}</td>
                   <td className="wrap">{pick(s, 'lastError', 'last_error') || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <h3>Doors opened</h3>
+      {usage === null ? (
+        <Loading>Counting doors…</Loading>
+      ) : usage.length === 0 ? (
+        <p className="empty">No doors opened yet.</p>
+      ) : (
+        <div className="tablewrap">
+          <table className="stats">
+            <thead>
+              <tr>
+                <th>Wanderer</th>
+                <th>Today</th>
+                <th>7 days</th>
+                <th>30 days</th>
+              </tr>
+            </thead>
+            <tbody>
+              {usage.map((u) => (
+                <tr key={u.email}>
+                  <td>{u.email}</td>
+                  <td>{u.today ?? '—'}</td>
+                  <td>{u.week ?? '—'}</td>
+                  <td>{u.month ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

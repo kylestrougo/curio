@@ -59,9 +59,10 @@ def init_app(app) -> None:
 
 
 def _ensure_email_prefs(user_id: int) -> None:
-    """Every user gets a prefs row, disabled. Configure nothing, get nothing."""
+    """Every user gets a prefs row, on by default — 8pm Eastern until they say otherwise."""
     execute(
-        "INSERT OR IGNORE INTO email_prefs (user_id, enabled, unsub_token) VALUES (?, 0, ?)",
+        "INSERT OR IGNORE INTO email_prefs (user_id, enabled, send_hour, timezone, unsub_token) "
+        "VALUES (?, 1, 20, 'America/New_York', ?)",
         (user_id, secrets.token_urlsafe(24)),
     )
 

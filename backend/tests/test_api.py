@@ -319,10 +319,54 @@ class TestAdmin:
         assert r.status_code == 200
         assert r.get_json()["ok"] is True
 
+    def test_usage_requires_admin(self, client):
+        client.post("/api/auth/signup", json={"email": "pleb@example.com", "password": "longenoughpw"})
+        assert client.get("/api/admin/usage").status_code == 403
+        client.post("/api/auth/logout")
+        assert client.get("/api/admin/usage").status_code == 401
+
+    def test_usage_counts_doors_per_user(self, client):
+        client.post("/api/auth/signup", json={"email": "one@b.com", "password": "longenoughpw"})
+        wander = client.post("/api/wanders").get_json()["id"]
+        for i in range(3):
+            client.post(
+                f"/api/wanders/{wander}/pages",
+                json={"clientNodeId": i + 1, "title": f"Door {i}", "blurb": "b"},
+            )
+        client.post("/api/auth/logout")
+        client.post("/api/auth/signup", json={"email": "admin@example.com", "password": "longenoughpw"})
+
+        body = client.get("/api/admin/usage").get_json()
+        assert [u["email"] for u in body["users"]] == ["one@b.com"]  # admin's 0 rows absent
+        u = body["users"][0]
+        assert (u["today"], u["week"], u["month"]) == (3, 3, 3)
+
+    def test_usage_windows_split_by_age(self, client, app):
+        client.post("/api/auth/signup", json={"email": "one@b.com", "password": "longenoughpw"})
+        wander = client.post("/api/wanders").get_json()["id"]
+        client.post(
+            f"/api/wanders/{wander}/pages", json={"clientNodeId": 1, "title": "Now", "blurb": "b"}
+        )
+        with app.app_context():
+            from curio.db import execute
+
+            execute(
+                "INSERT INTO pages (wander_id, kind, title, blurb, created_at) "
+                "VALUES (?, 'topic', 'Older', 'b', datetime('now', '-10 days'))",
+                (wander,),
+            )
+        client.post("/api/auth/logout")
+        client.post("/api/auth/signup", json={"email": "admin@example.com", "password": "longenoughpw"})
+
+        u = client.get("/api/admin/usage").get_json()["users"][0]
+        assert (u["today"], u["week"], u["month"]) == (1, 1, 2)
+
 
 class TestEmailPrefs:
-    def test_default_is_off(self, signed_in):
-        assert signed_in.get("/api/email-prefs").get_json()["enabled"] is False
+    def test_default_is_on_at_8pm(self, signed_in):
+        prefs = signed_in.get("/api/email-prefs").get_json()
+        assert prefs["enabled"] is True
+        assert prefs["sendHour"] == 20
 
     def test_round_trip(self, signed_in):
         r = signed_in.put(
@@ -346,7 +390,7 @@ class TestEmailPrefs:
             "/api/email-prefs", json={"enabled": True, "frequency": "hourly", "sendHour": 99}
         ).get_json()
         assert body["frequency"] == "daily"
-        assert body["sendHour"] == 8
+        assert body["sendHour"] == 20
 
     def test_unsubscribe_is_one_click(self, signed_in, app):
         signed_in.put("/api/email-prefs", json={"enabled": True})

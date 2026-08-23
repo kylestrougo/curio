@@ -45,12 +45,31 @@ def _ensure_column(db: sqlite3.Connection, table: str, column: str, decl: str) -
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
 
+def _once(db: sqlite3.Connection, flag: str) -> bool:
+    """Claim a one-time data-migration flag in app_config.
+
+    True only for the boot that wins the INSERT — every later boot (and every
+    concurrent worker, thanks to SQLite's single-writer lock) sees the row and
+    skips. The flag and the migration it guards share init_db's transaction.
+    """
+    cur = db.execute("INSERT OR IGNORE INTO app_config (key, value) VALUES (?, 'done')", (flag,))
+    return cur.rowcount == 1
+
+
 def init_db() -> None:
     db = get_db()
     db.executescript(SCHEMA_PATH.read_text())
     # Columns added after first deploy (see _ensure_column):
     _ensure_column(db, "email_prefs", "timezone", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(db, "page_cache", "terms_json", "TEXT NOT NULL DEFAULT '[]'")
+    # One-time data migrations, each behind a claimed flag (see _once).
+    if _once(db, "migrated:email_on_by_default"):
+        # Emails became opt-out: flip everyone on once, move the untouched
+        # 8am default to 8pm, and give zone-less rows the Eastern default.
+        # A user who disables afterwards is never re-flipped — the flag stays.
+        db.execute("UPDATE email_prefs SET enabled = 1")
+        db.execute("UPDATE email_prefs SET send_hour = 20 WHERE send_hour = 8")
+        db.execute("UPDATE email_prefs SET timezone = 'America/New_York' WHERE timezone = ''")
     db.commit()
 
 

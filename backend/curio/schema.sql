@@ -54,10 +54,10 @@ CREATE TABLE IF NOT EXISTS app_config (
 
 CREATE TABLE IF NOT EXISTS email_prefs (
     user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    enabled     INTEGER NOT NULL DEFAULT 0,
+    enabled     INTEGER NOT NULL DEFAULT 1,
     topics_json TEXT    NOT NULL DEFAULT '[]',
     wildcard    INTEGER NOT NULL DEFAULT 1,
-    send_hour   INTEGER NOT NULL DEFAULT 8,       -- hour 0-23 on the user's own clock
+    send_hour   INTEGER NOT NULL DEFAULT 20,      -- hour 0-23 on the user's own clock
     frequency   TEXT    NOT NULL DEFAULT 'daily'
                 CHECK (frequency IN ('daily', 'weekdays', 'weekly')),
     unsub_token TEXT    NOT NULL UNIQUE,

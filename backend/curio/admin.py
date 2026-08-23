@@ -7,13 +7,16 @@ no restart.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from functools import wraps
+from zoneinfo import ZoneInfo
 
 import requests
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user
 
 from . import prompts
+from .db import query
 from .llm import (
     CONFIG_KEY_CHAIN,
     CONFIG_KEY_OVERRIDES,
@@ -141,3 +144,51 @@ def test():
 def stats():
     days = request.args.get("days", type=int) or 7
     return jsonify(stats_rollup(days=max(1, min(days, 90))))
+
+
+def _server_tz() -> ZoneInfo:
+    try:
+        return ZoneInfo(current_app.config.get("DEFAULT_TZ") or "UTC")
+    except Exception:
+        return ZoneInfo("UTC")
+
+
+@bp.get("/usage")
+@admin_required
+def usage():
+    """Doors opened per signed-in user: today / last 7 days / last 30 days.
+
+    One pages row is one door opened (the upsert never bumps created_at).
+    Day boundaries are the server's DEFAULT_TZ, so an 11pm door doesn't
+    count as tomorrow. Anonymous opens are never persisted, so they can't
+    appear here.
+    """
+    rows = query(
+        "SELECT u.email, p.created_at FROM pages p "
+        "JOIN wanders w ON w.id = p.wander_id "
+        "JOIN users u ON u.id = w.user_id "
+        "WHERE p.created_at >= datetime('now', '-31 days')"
+    )
+    tz = _server_tz()
+    today = datetime.now(timezone.utc).astimezone(tz).date()
+    per: dict[str, dict] = {}
+    for r in rows:
+        try:  # created_at is SQLite's UTC 'YYYY-MM-DD HH:MM:SS'
+            opened = datetime.strptime(r["created_at"], "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
+        except (ValueError, TypeError):
+            continue
+        # 31 days of rows, then the exact 30-local-day cut here, so a UTC
+        # timestamp that localizes backwards across midnight still counts.
+        age = (today - opened.astimezone(tz).date()).days
+        if age < 0 or age > 29:
+            continue
+        s = per.setdefault(r["email"], {"email": r["email"], "today": 0, "week": 0, "month": 0})
+        s["month"] += 1
+        if age < 7:
+            s["week"] += 1
+        if age == 0:
+            s["today"] += 1
+    users = sorted(per.values(), key=lambda s: (-s["week"], -s["month"], s["email"]))
+    return jsonify({"users": users, "timezone": str(tz)})

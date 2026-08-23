@@ -245,23 +245,16 @@ def warm_cache_command(limit):
     generation); the only budget spent is the shared OpenRouter key's, which
     is why the nightly limit stays small.
     """
-    import json as _json
     import random as _random
 
-    from .config import BASE_DIR
     from .llm import LLMError, generate
+    from .seedpool import load_pool
 
-    pool_path = BASE_DIR.parent / "shared" / "seed-pool.json"
-    try:
-        pool = _json.loads(pool_path.read_text())
-    except (OSError, ValueError) as exc:
-        raise click.ClickException(f"can't read {pool_path}: {exc}")
+    pool = load_pool()
+    if not pool:
+        raise click.ClickException("seed pool is empty or unreadable (shared/seed-pool.json)")
 
-    todo = [
-        s for s in pool
-        if isinstance(s, dict) and s.get("label")
-        and not pagecache.has_page(s["label"], s.get("type", "topic"))
-    ]
+    todo = [s for s in pool if not pagecache.has_page(s["label"], s.get("type", "topic"))]
     _random.shuffle(todo)  # spread coverage rather than always warming the top
 
     warmed = failures = 0

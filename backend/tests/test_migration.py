@@ -88,11 +88,60 @@ def test_boot_adds_timezone_to_an_existing_database(old_db_path):
     # Whole new tables need no ALTER — CREATE TABLE IF NOT EXISTS covers them.
     assert "token" in _columns(old_db_path, "shared_pages")
 
-    # Existing rows got the empty default (→ server default zone), unharmed.
+    # Existing rows survive, and the on-by-default migration filled the zone.
     conn = sqlite3.connect(old_db_path)
     row = conn.execute("SELECT enabled, timezone FROM email_prefs").fetchone()
     conn.close()
-    assert row == (1, "")
+    assert row == (1, "America/New_York")
+
+
+def test_boot_enables_email_for_existing_users(old_db_path):
+    """The opt-out flip: one boot turns everyone on at 8pm Eastern, once."""
+    conn = sqlite3.connect(old_db_path)
+    conn.execute("INSERT INTO users (email, password_hash) VALUES ('two@example.com', 'x')")
+    conn.execute(
+        "INSERT INTO email_prefs (user_id, enabled, send_hour, unsub_token) VALUES (2, 0, 8, 't2')"
+    )
+    conn.commit()
+    conn.close()
+
+    class Cfg(Config):
+        DATABASE = old_db_path
+        SECRET_KEY = "test-secret"
+        TESTING = True
+
+    create_app(Cfg)
+    conn = sqlite3.connect(old_db_path)
+    row = conn.execute(
+        "SELECT enabled, send_hour, timezone FROM email_prefs WHERE user_id = 2"
+    ).fetchone()
+    flag = conn.execute(
+        "SELECT value FROM app_config WHERE key = 'migrated:email_on_by_default'"
+    ).fetchone()
+    conn.close()
+    assert row == (1, 20, "America/New_York")
+    assert flag is not None
+
+
+def test_migration_runs_once(old_db_path):
+    """A user who opts back out after the flip is never re-flipped."""
+
+    class Cfg(Config):
+        DATABASE = old_db_path
+        SECRET_KEY = "test-secret"
+        TESTING = True
+
+    create_app(Cfg)  # first boot claims the flag and flips the row on
+    conn = sqlite3.connect(old_db_path)
+    conn.execute("UPDATE email_prefs SET enabled = 0, send_hour = 7 WHERE user_id = 1")
+    conn.commit()
+    conn.close()
+
+    create_app(Cfg)  # second boot must leave the opt-out alone
+    conn = sqlite3.connect(old_db_path)
+    row = conn.execute("SELECT enabled, send_hour FROM email_prefs WHERE user_id = 1").fetchone()
+    conn.close()
+    assert row == (0, 7)
 
 
 def test_boot_is_idempotent_on_a_current_database(old_db_path):

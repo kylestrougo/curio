@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from curio import email_, llm
+from curio import email_, llm, seedpool
 from curio.db import query
 
 
@@ -120,11 +120,53 @@ class TestSending:
         client.post("/api/auth/signup", json={"email": "w@example.com", "password": "longenoughpw"})
         client.put("/api/email-prefs", json={"enabled": True, "topics": ["astronomy"]})
 
-    def test_configure_nothing_get_nothing(self, client, app, stub_doors):
-        """The core guarantee: a user who never opted in is never emailed."""
+    def test_pool_sampling_prefers_distinct_domains(self):
+        import random
+
+        doors = seedpool.sample_doors(4, rng=random.Random(0))
+        assert len(doors) == 4
+        assert all(d["label"] and d["type"] in {"fact", "question", "topic"} for d in doors)
+        # Reproducible under a seeded rng, like the prompt helpers.
+        assert doors == seedpool.sample_doors(4, rng=random.Random(0))
+
+    def test_signup_prefs_default_on_at_8pm_eastern(self, client):
+        """Emails are opt-out now: a fresh account is already scheduled."""
+        client.post("/api/auth/signup", json={"email": "w@example.com", "password": "longenoughpw"})
+        prefs = client.get("/api/email-prefs").get_json()
+        assert prefs["enabled"] is True
+        assert prefs["sendHour"] == 20
+        assert prefs["timezone"] == "America/New_York"
+
+    def test_unconfigured_user_gets_curated_doors(self, client, app, monkeypatch):
+        """No saved topics → doors come from the pool, and no LLM is called."""
+
+        def boom(*_a, **_k):
+            raise AssertionError("topic-less emails must not call the LLM")
+
+        monkeypatch.setattr(llm, "_post", boom)
         client.post("/api/auth/signup", json={"email": "w@example.com", "password": "longenoughpw"})
         with app.app_context():
-            assert email_.send_due_emails() == {"sent": 0, "skipped": 0, "failed": 0}
+            user_id = query("SELECT id FROM users LIMIT 1", (), one=True)["id"]
+            result = email_.send_due_emails(force_user_id=user_id)
+            assert result["sent"] == 1
+            tokens = query("SELECT * FROM door_tokens", ())
+            assert len(tokens) == 4
+            pool_labels = {s["label"] for s in seedpool.load_pool()}
+            assert all(t["label"] in pool_labels for t in tokens)
+
+    def test_settings_note_only_when_topicless(self, app):
+        with app.app_context():
+            doors = [{"label": "A door", "kind": "topic", "token": "tok123"}]
+            with_note = email_._render("w@example.com", doors, "u", settings_note=True)
+            without = email_._render("w@example.com", doors, "u")
+        for body in with_note:
+            assert "save what you're curious about in settings" in body
+        for body in without:
+            assert "save what you're curious about" not in body
+        # The note keeps the anti-dark-pattern promises too.
+        lowered = with_note[1].lower()
+        for banned in ("miss you", "streak", "don't miss", "last chance", "hurry", "expire"):
+            assert banned not in lowered
 
     def test_forced_send_produces_doors_and_tokens(self, client, app, stub_doors):
         self._enable(client)

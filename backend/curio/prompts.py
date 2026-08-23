@@ -118,6 +118,13 @@ _OVERUSED = (
     "Vikings and horned helmets, and glass being a slow-flowing liquid"
 )
 
+# One door, one interest. Without this, models mesh two saved interests into
+# a single hybrid door ("maps of the deep sea") that serves neither.
+_ONE_INTEREST_PER_DOOR = (
+    "Each door must grow out of exactly one of their interests — "
+    "never combine two interests into a single door. "
+)
+
 
 def seeds(count: int, exclude: list[str], rng=None) -> tuple[str, str]:
     """Doors for the home screen.
@@ -271,6 +278,7 @@ def topical_seeds(topics: list[str], exclude: list[str], count: int = 6, rng=Non
         "specific stated interests. Every door must be *adjacent* to one of their interests — "
         "a surprising corner, origin, person, or open question near it — never a restatement "
         "of the interest itself. "
+        + _ONE_INTEREST_PER_DOOR
         + angle
         + " Each door must name a real, verifiable subject, specific enough not to be a "
         "category — 'The clock that runs on melting ice' works, 'Interesting facts about "
@@ -298,6 +306,7 @@ def email_doors(topics: list[str], wildcard: bool, thread: str | None, count: in
         + f" Produce {count} irresistible entry points into knowledge for a specific reader, "
         "drawn from their stated interests. Each should stand alone and be worth a few minutes "
         "of wandering. Write for someone who may not read this today — no urgency, no hype. "
+        + _ONE_INTEREST_PER_DOOR
         + (
             "Include exactly one door from a domain completely unrelated to their interests, "
             "as a pleasant surprise. "

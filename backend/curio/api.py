@@ -105,6 +105,17 @@ def _normalise_seeds(raw) -> list[dict]:
     return _normalise_buttons(raw, limit=8) if isinstance(raw, list) else []
 
 
+def drop_restatements(seeds: list[dict], topics: list[str]) -> list[dict]:
+    """A saved interest can never BE a door, no matter what the model says."""
+
+    def norm(s: str) -> str:
+        s = s.strip().lower().rstrip(".!?")
+        return s[4:] if s.startswith("the ") else s
+
+    banned = {norm(t) for t in topics}
+    return [s for s in seeds if norm(s["label"]) not in banned]
+
+
 def _gate():
     """Shared rate-limit gate for every generation endpoint."""
     allowed, message = check_and_count_generation()
@@ -187,7 +198,7 @@ def topical_seeds():
     if error:
         return error
 
-    result = _normalise_seeds(parsed.get("seeds"))
+    result = drop_restatements(_normalise_seeds(parsed.get("seeds")), topics)
     if not result:
         return _err("generation_failed", "No doors came back. Try again.", 502)
     return jsonify({"seeds": result})

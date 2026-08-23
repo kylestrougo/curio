@@ -118,11 +118,16 @@ _OVERUSED = (
     "Vikings and horned helmets, and glass being a slow-flowing liquid"
 )
 
-# One door, one interest. Without this, models mesh two saved interests into
-# a single hybrid door ("maps of the deep sea") that serves neither.
+# One door, one interest — stated through a worked example, because the
+# abstract version ("grow out of exactly one interest") made weak models
+# serve the interest itself as a door, and the hybrid version meshed two
+# interests into one ("maps of the deep sea") serving neither.
 _ONE_INTEREST_PER_DOOR = (
-    "Each door must grow out of exactly one of their interests — "
-    "never combine two interests into a single door. "
+    "Each door opens a surprising, specific corner of exactly one of their "
+    "interests — never the interest itself restated as a label, and never "
+    "two interests blended into one door. For the interest 'astronomy': "
+    "'The star that vanished without a supernova' works; 'Astronomy', "
+    "'Astronomy basics', and 'The astronomy of cooking' do not. "
 )
 
 
@@ -275,7 +280,7 @@ def topical_seeds(topics: list[str], exclude: list[str], count: int = 6, rng=Non
     system = (
         PERSONA
         + f" Produce {count} irresistible entry points into knowledge for a reader with "
-        "specific stated interests. Every door must be *adjacent* to one of their interests — "
+        "specific stated interests. Every door must be *adjacent* to exactly one of their interests — "
         "a surprising corner, origin, person, or open question near it — never a restatement "
         "of the interest itself. "
         + _ONE_INTEREST_PER_DOOR

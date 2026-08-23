@@ -120,6 +120,22 @@ class TestSending:
         client.post("/api/auth/signup", json={"email": "w@example.com", "password": "longenoughpw"})
         client.put("/api/email-prefs", json={"enabled": True, "topics": ["astronomy"]})
 
+    def test_email_doors_never_restate_a_topic(self, client, app, monkeypatch):
+        """The restatement guard covers the email path too."""
+        seeds = [
+            {"label": "astronomy", "type": "topic"},
+            {"label": "The telescope that was buried in ice", "type": "fact"},
+            {"label": "A comet only photographed once", "type": "fact"},
+        ]
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: json.dumps({"seeds": seeds}))
+        self._enable(client)
+        client.put("/api/email-prefs", json={"enabled": True, "topics": ["astronomy"]})
+        with app.app_context():
+            user_id = query("SELECT id FROM users LIMIT 1", (), one=True)["id"]
+            assert email_.send_due_emails(force_user_id=user_id)["sent"] == 1
+            labels = {t["label"] for t in query("SELECT label FROM door_tokens", ())}
+            assert labels == {"The telescope that was buried in ice", "A comet only photographed once"}
+
     def test_pool_sampling_prefers_distinct_domains(self):
         import random
 

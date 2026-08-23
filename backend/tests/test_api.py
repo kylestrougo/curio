@@ -226,6 +226,25 @@ class TestGeneration:
         # …and the brief demands adjacency, not restatement.
         assert "adjacent" in system
 
+    def test_topical_seeds_never_restate_a_topic(self, signed_in, monkeypatch):
+        """Even a disobedient model can't put a saved interest on screen as
+        a door — the server drops verbatim restatements (case, a leading
+        'the', and trailing punctuation don't disguise them)."""
+        import json as _json
+
+        signed_in.put("/api/email-prefs", json={"topics": ["astronomy"]})
+        seeds = [
+            {"label": "Astronomy", "type": "topic"},
+            {"label": "The star that vanished without a supernova", "type": "fact"},
+            {"label": "The Astronomy.", "type": "topic"},
+            {"label": "astronomy!", "type": "topic"},
+        ]
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: _json.dumps({"seeds": seeds}))
+        r = signed_in.post("/api/seeds/topical", json={})
+        assert r.status_code == 200
+        labels = [s["label"] for s in r.get_json()["seeds"]]
+        assert labels == ["The star that vanished without a supernova"]
+
     def test_topical_seeds_count_against_quota(self, signed_in, stub_llm, app):
         signed_in.put("/api/email-prefs", json={"topics": ["astronomy"]})
         assert signed_in.post("/api/seeds/topical", json={}).status_code == 200

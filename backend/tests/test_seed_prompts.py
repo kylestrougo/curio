@@ -91,12 +91,14 @@ class TestTopicalSeeds:
     def test_one_interest_per_door(self):
         system, _ = prompts.topical_seeds(["old maps", "bees"], [])
         assert "exactly one of their interests" in system
-        assert "never combine two interests" in system
+        assert "never the interest itself restated" in system
+        assert "The star that vanished without a supernova" in system
 
     def test_email_doors_share_the_one_interest_rule(self):
         system, _ = prompts.email_doors(["old maps", "bees"], False, None)
         assert "exactly one of their interests" in system
-        assert "never combine two interests" in system
+        assert "never the interest itself restated" in system
+        assert "The star that vanished without a supernova" in system
 
     def test_seeded_rng_is_reproducible(self):
         a = prompts.topical_seeds(["x"], [], rng=random.Random(5))

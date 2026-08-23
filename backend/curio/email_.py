@@ -369,7 +369,14 @@ def send_due_emails(force_user_id: int | None = None) -> dict:
                 log.error("door generation failed for user %s: %s", prefs["user_id"], exc)
                 failed += 1
                 continue
-            raw_seeds = parsed.get("seeds") or []
+            from .api import drop_restatements
+
+            raw_seeds = [
+                s
+                for s in (parsed.get("seeds") or [])
+                if isinstance(s, dict) and isinstance(s.get("label"), str) and s["label"].strip()
+            ]
+            raw_seeds = drop_restatements(raw_seeds, topics)
         else:
             # No saved interests: curated wildcards from the pool, no LLM call.
             raw_seeds = seedpool.sample_doors(4)

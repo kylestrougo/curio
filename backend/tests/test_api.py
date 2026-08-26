@@ -256,6 +256,45 @@ class TestGeneration:
             )
             assert row["count"] == 1
 
+    def test_empty_answer_walks_the_chain_not_a_502(self, client, app, monkeypatch):
+        """Valid JSON with an empty answer used to 502 on the spot, the rest
+        of the chain never consulted — the main culprit behind 'That one
+        didn't come through — try asking again.'"""
+        import json as _json
+
+        replies = [
+            _json.dumps({"answer": ""}),       # model a, attempt 1
+            _json.dumps({"answer": ""}),       # model a, attempt 2
+            _json.dumps({"answer": "Real."}),  # model b
+        ]
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: replies.pop(0))
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+        r = client.post("/api/ask", json={"title": "t", "said": "s", "question": "why?"})
+        assert r.status_code == 200
+        assert r.get_json()["answer"] == "Real."
+
+    def test_all_restatement_hand_retries_the_chain(self, signed_in, app, monkeypatch):
+        # A hand that is nothing but restatements is as useless as no hand:
+        # the chain keeps walking instead of 502ing on the first model's say.
+        import json as _json
+
+        replies = [
+            _json.dumps({"seeds": [{"label": "Astronomy", "type": "topic"}]}),
+            _json.dumps({"seeds": [{"label": "astronomy!", "type": "topic"}]}),
+            _json.dumps(
+                {"seeds": [{"label": "The star that vanished without a supernova", "type": "fact"}]}
+            ),
+        ]
+        monkeypatch.setattr(llm, "_post", lambda *a, **k: replies.pop(0))
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+        signed_in.put("/api/email-prefs", json={"topics": ["astronomy"]})
+        r = signed_in.post("/api/seeds/topical", json={})
+        assert r.status_code == 200
+        labels = [s["label"] for s in r.get_json()["seeds"]]
+        assert labels == ["The star that vanished without a supernova"]
+
     def test_more_and_ask_and_recap(self, client, stub_llm):
         assert client.post("/api/more", json={"title": "t", "said": "s"}).get_json()["more"]
         assert client.post(

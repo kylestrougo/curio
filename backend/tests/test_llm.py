@@ -114,6 +114,57 @@ class TestFallbackChain:
             assert stats["a"]["okRate"] == 0.5
 
 
+class TestValidateHook:
+    """Parsed-but-unusable JSON must walk the chain like unparseable JSON.
+
+    Before the hook, `{"answer": ""}` counted as a success: the endpoint
+    502'd with two perfectly good fallback models never consulted, and the
+    admin stats recorded the empty reply as the model behaving."""
+
+    def _patch(self, monkeypatch, responses):
+        calls = []
+
+        def fake_post(model, system, user, max_tokens, json_mode, temperature=None, timeout=None):
+            calls.append(model)
+            return responses.pop(0)
+
+        monkeypatch.setattr(llm, "_post", fake_post)
+        return calls
+
+    def test_empty_answer_walks_the_chain(self, app, monkeypatch):
+        with app.app_context():
+            calls = self._patch(
+                monkeypatch, ['{"answer": ""}', '{"answer": ""}', '{"answer": "real"}']
+            )
+            got = llm.generate(
+                "s", "u", models=["a", "b"],
+                validate=lambda p: str(p.get("answer") or "").strip(),
+            )
+            assert got == {"answer": "real"}
+            # Both of a's attempts spent before b is consulted, same as bad JSON.
+            assert calls == ["a", "a", "b"]
+
+    def test_without_a_validator_nothing_changes(self, app, monkeypatch):
+        with app.app_context():
+            calls = self._patch(monkeypatch, ['{"answer": ""}'])
+            assert llm.generate("s", "u", models=["a", "b"]) == {"answer": ""}
+            assert calls == ["a"]
+
+    def test_every_model_failing_validation_raises(self, app, monkeypatch):
+        with app.app_context():
+            self._patch(monkeypatch, ['{"answer": ""}'] * 4)
+            with pytest.raises(llm.LLMError, match="validation"):
+                llm.generate("s", "u", models=["a", "b"], validate=lambda p: p.get("answer"))
+
+    def test_validation_failures_land_in_stats_as_failures(self, app, monkeypatch):
+        with app.app_context():
+            self._patch(monkeypatch, ['{"answer": ""}', '{"answer": "ok"}'])
+            llm.generate("s", "u", intent="ask", models=["a"], validate=lambda p: p.get("answer"))
+            stats = {m["model"]: m for m in llm.stats_rollup(days=1)["models"]}
+            assert stats["a"]["calls"] == 2
+            assert stats["a"]["okRate"] == 0.5
+
+
 class TestChainConfig:
     def test_default_chain_from_config(self, app):
         with app.app_context():

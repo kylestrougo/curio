@@ -14,6 +14,7 @@ Design notes, carried from the handoff brief:
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 import logging
 import re
 import time
@@ -234,7 +235,10 @@ def _post(
         raise LLMError(f"unexpected response shape: {str(data)[:200]}")
 
 
-def _post_stream(model: str, system: str, user: str, max_tokens: int, temperature: float | None):
+def _post_stream(
+    model: str, system: str, user: str, max_tokens: int,
+    temperature: float | None, timeout: float | None = None,
+):
     """Yield content deltas from one model's streaming response.
 
     Raises LLMError before the first yield when the model is unreachable or
@@ -271,7 +275,7 @@ def _post_stream(model: str, system: str, user: str, max_tokens: int, temperatur
         # The read timeout applies between chunks on a streaming response, so
         # this bounds stalls, not total duration — a stream that is actually
         # producing tokens is allowed to keep going.
-        timeout=cfg["OPENROUTER_TIMEOUT"],
+        timeout=timeout if timeout is not None else cfg["OPENROUTER_TIMEOUT"],
     )
     if res.status_code != 200:
         detail = res.text[:200]
@@ -319,12 +323,23 @@ def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000)
         raise LLMError("no models configured")
 
     temperature = _temperature_for(intent)
+    # Same overall deadline as generate(): before this, the pre-first-token
+    # walk could take a full OPENROUTER_TIMEOUT per model — longer than the
+    # whole non-streaming path — while the client showed only a spinner. Only
+    # NEW attempts check it; a stream already delivering tokens is never cut.
+    deadline = time.monotonic() + current_app.config["GENERATION_BUDGET"]
     last_error = "no models attempted"
     for model in chain:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise LLMError(f"generation budget exhausted; last: {last_error}")
         started = time.monotonic()
         yielded = False
         try:
-            for chunk in _post_stream(model, system, user, max_tokens, temperature):
+            for chunk in _post_stream(
+                model, system, user, max_tokens, temperature,
+                timeout=min(current_app.config["OPENROUTER_TIMEOUT"], remaining),
+            ):
                 if not yielded:
                     yielded = True
                     _record(model, intent, True, int((time.monotonic() - started) * 1000), None)
@@ -353,12 +368,19 @@ def generate(
     intent: str = "generic",
     max_tokens: int = 1000,
     models: list[str] | None = None,
+    validate: Callable[[dict], object] | None = None,
 ) -> dict:
     """Run the chain until one model returns parseable JSON.
 
     `max_tokens` defaults to 1000 for the same reason the artifact used it: a
     low cap truncates the JSON and breaks parsing. Terseness is enforced by the
     prompt, not by starving the model of tokens.
+
+    `validate` lets the caller say what "usable" means beyond parseable —
+    e.g. a non-empty "answer" key. A parsed-but-unusable reply walks the
+    chain exactly like unparseable JSON and is recorded as a model failure;
+    without it, `{"answer": ""}` counted as a success and the endpoint 502'd
+    with two perfectly good fallback models never consulted.
     """
     chain = models if models is not None else chain_for(intent)
     if not chain:
@@ -400,6 +422,15 @@ def generate(
                     model, attempt + 1, PARSE_ATTEMPTS_PER_MODEL,
                 )
                 continue  # give this model its second chance, without json_mode
+
+            if validate is not None and not validate(parsed):
+                last_error = "parsed but failed validation"
+                _record(model, intent, False, elapsed, last_error)
+                log.warning(
+                    "model %s returned JSON without the goods (attempt %d/%d)",
+                    model, attempt + 1, PARSE_ATTEMPTS_PER_MODEL,
+                )
+                continue
 
             _record(model, intent, True, elapsed, None)
             return parsed

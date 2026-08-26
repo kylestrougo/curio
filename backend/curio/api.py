@@ -15,7 +15,7 @@ from flask_login import current_user, login_required
 from . import pagecache, prompts
 from .db import execute, get_db, query
 from .llm import LLMError, generate, generate_stream
-from .ratelimit import check_and_count_generation
+from .ratelimit import check_and_count_generation, refund_generation
 
 log = logging.getLogger(__name__)
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -124,9 +124,9 @@ def _gate():
     return None
 
 
-def _generate(system: str, user: str, intent: str):
+def _generate(system: str, user: str, intent: str, validate=None):
     try:
-        return generate(system, user, intent=intent), None
+        return generate(system, user, intent=intent, validate=validate), None
     except LLMError as exc:
         log.error("generation failed for %s: %s", intent, exc)
         return None, _err(
@@ -134,6 +134,11 @@ def _generate(system: str, user: str, intent: str):
             "That door didn't open. Every model in the chain came back empty.",
             502,
         )
+
+
+def _has_text(key: str):
+    """Validator: the reply carries a non-empty string under `key`."""
+    return lambda parsed: isinstance(parsed.get(key), str) and parsed[key].strip()
 
 
 # ── generation ──────────────────────────────────────────────────────────
@@ -153,7 +158,9 @@ def seeds():
     exclude = _clean_list(data.get("exclude"), limit=40, item_limit=160)
 
     system, user = prompts.seeds(count, exclude)
-    parsed, error = _generate(system, user, "seeds")
+    parsed, error = _generate(
+        system, user, "seeds", validate=lambda p: _normalise_seeds(p.get("seeds"))
+    )
     if error:
         return error
 
@@ -194,7 +201,12 @@ def topical_seeds():
     exclude = _clean_list(data.get("exclude"), limit=40, item_limit=160)
 
     system, user = prompts.topical_seeds(topics, exclude, count)
-    parsed, error = _generate(system, user, "topical_seeds")
+    # A hand that is nothing but restatements is as useless as no hand at
+    # all — let the chain try again rather than 502 on the first model's say.
+    parsed, error = _generate(
+        system, user, "topical_seeds",
+        validate=lambda p: drop_restatements(_normalise_seeds(p.get("seeds")), topics),
+    )
     if error:
         return error
 
@@ -230,7 +242,7 @@ def page():
     exclude = _clean_list(data.get("exclude"), limit=20, item_limit=200)
 
     system, user = prompts.page(label, kind, path, surprise, exclude)
-    parsed, error = _generate(system, user, "page")
+    parsed, error = _generate(system, user, "page", validate=_has_text("blurb"))
     if error:
         return error
 
@@ -260,7 +272,7 @@ def more():
         return _err("bad_request", "Which page?", 400)
 
     system, user = prompts.more(title, said)
-    parsed, error = _generate(system, user, "more")
+    parsed, error = _generate(system, user, "more", validate=_has_text("more"))
     if error:
         return error
     text = _clean_text(parsed.get("more"), 2000)
@@ -281,7 +293,7 @@ def ask():
         return _err("bad_request", "Ask something first.", 400)
 
     system, user = prompts.ask(title, said, question)
-    parsed, error = _generate(system, user, "ask")
+    parsed, error = _generate(system, user, "ask", validate=_has_text("answer"))
     if error:
         return error
     answer = _clean_text(parsed.get("answer"), 2000)
@@ -380,11 +392,18 @@ def _sse_response(system: str, user: str, intent: str) -> Response:
                     continue
                 yield f"data: {json.dumps(chunk)}\n\n"
             if not sent_any:
+                # The reader got nothing for their quota unit; give it back.
+                # The client's very next move is the non-streaming fallback,
+                # which charges afresh — without the refund a failed question
+                # costs double, and a user at the cap sees the quota message
+                # for what was really a model failure.
+                refund_generation()
                 yield f"event: error\ndata: {json.dumps('Nothing came back.')}\n\n"
                 return
             yield "event: done\ndata: {}\n\n"
         except LLMError as exc:
             log.error("stream failed for %s: %s", intent, exc)
+            refund_generation()
             yield f"event: error\ndata: {json.dumps('That answer broke off.')}\n\n"
 
     return Response(

@@ -16,7 +16,7 @@ from curio.db import query
 def _stub_stream(monkeypatch, per_model):
     """per_model: model id → list of chunks, or an Exception, or a callable
     yielding chunks then raising (for mid-stream death)."""
-    def fake(model, system, user, max_tokens, temperature):
+    def fake(model, system, user, max_tokens, temperature, timeout=None):
         item = per_model[model]
         if isinstance(item, Exception):
             raise item
@@ -65,6 +65,28 @@ class TestGenerateStream:
             llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
             with pytest.raises(llm.LLMError):
                 list(llm.generate_stream("s", "u", "more"))
+
+    def test_budget_stops_the_pre_token_walk(self, app, monkeypatch):
+        """The pre-first-token walk shares generate()'s deadline. Without it,
+        three dead models each got a full OPENROUTER_TIMEOUT — longer than
+        the whole non-streaming path — while the client showed a spinner."""
+        clock = {"t": 0.0}
+        monkeypatch.setattr(llm.time, "monotonic", lambda: clock["t"])
+        calls = []
+
+        def slow_stream(model, system, user, max_tokens, temperature, timeout=None):
+            calls.append(model)
+            clock["t"] += 40  # each attempt eats 40 "seconds"
+            raise llm.LLMError("HTTP 500")
+
+        monkeypatch.setattr(llm, "_post_stream", slow_stream)
+        app.config["GENERATION_BUDGET"] = 60
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b", "c"])
+            with pytest.raises(llm.LLMError, match="budget exhausted"):
+                list(llm.generate_stream("s", "u", "more"))
+        # a (t=0→40) runs, b (t=40) starts inside budget, c (t=80) never does.
+        assert calls == ["a", "b"]
 
     def test_stats_record_time_to_first_token(self, app, monkeypatch):
         _stub_stream(monkeypatch, {"a": ["x", "y"]})
@@ -132,6 +154,35 @@ class TestStreamEndpoints:
                 "SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True
             )
             assert row["count"] == 1
+
+    def test_failed_stream_refunds_the_quota_unit(self, client, app, monkeypatch):
+        """The stream charges up front, but a stream that delivers nothing
+        gives the unit back — the client's next move is the non-streaming
+        fallback, which charges afresh, and one failed question must not
+        cost double (or show the quota message at the cap boundary)."""
+        _stub_stream(monkeypatch, {"m": llm.LLMError("dead")})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["m"])
+        r = client.post("/api/more/stream", json={"title": "T", "said": "s"})
+        assert "error" in [e for e, _ in _frames(r)]  # consumes the stream
+        with app.app_context():
+            row = query(
+                "SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True
+            )
+            assert row["count"] == 0
+
+    def test_whitespace_only_stream_refunds_too(self, client, app, monkeypatch):
+        # The model "succeeded" but nothing readable ever left: same refund.
+        _stub_stream(monkeypatch, {"m": ["   "]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["m"])
+        r = client.post("/api/more/stream", json={"title": "T", "said": "s"})
+        assert "error" in [e for e, _ in _frames(r)]
+        with app.app_context():
+            row = query(
+                "SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True
+            )
+            assert row["count"] == 0
 
     def test_ask_stream_happy_path(self, client, app, monkeypatch):
         _stub_stream(monkeypatch, {"m": ["An ", "answer."]})

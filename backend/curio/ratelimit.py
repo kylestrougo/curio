@@ -91,6 +91,23 @@ def check_signup_rate() -> tuple[bool, str]:
     return True, ""
 
 
+def refund_generation() -> None:
+    """Give back one unit for a generation that delivered nothing usable.
+
+    The stream endpoints charge up front (the counter is a race-free upsert),
+    but a stream can die before any content reaches the reader — after which
+    the client retries through the non-streaming endpoint and is charged
+    again. Without the refund, one failed question costs two units, and a
+    user at the cap gets the quota message for what was really a model
+    failure.
+    """
+    subject, _ = _subject()
+    execute(
+        "UPDATE usage_counters SET count = MAX(count - 1, 0) WHERE subject = ? AND day = ?",
+        (subject, _today()),
+    )
+
+
 def prune_counters(keep_days: int = 7) -> int:
     """Housekeeping for the nightly cron — the table is otherwise unbounded."""
     db = get_db()

@@ -37,6 +37,31 @@ function shrug(what, e) {
   console.warn(`[curio] ${what} didn't persist:`, e && e.message ? e.message : e);
 }
 
+// The topical row's answer to the static seed pool: the last visit's hand
+// and pool, remembered per browser. The main row paints instantly from
+// shipped JSON; this row's doors are personal, so its "shipped JSON" is
+// whatever the last visit generated. Storage is a convenience, never a
+// dependency — every access is guarded, and an empty cache just means the
+// first-visit pop-in.
+const TOPICAL_CACHE_KEY = 'curio:topical:v1';
+
+function readTopicalCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(TOPICAL_CACHE_KEY));
+    return c && Array.isArray(c.pool) && Array.isArray(c.hand) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearTopicalCache() {
+  try {
+    localStorage.removeItem(TOPICAL_CACHE_KEY);
+  } catch {
+    /* nothing to clear, or storage unavailable — same outcome */
+  }
+}
+
 export function useWander(user) {
   const signedIn = !!(user && user.id != null);
 
@@ -73,6 +98,7 @@ export function useWander(user) {
   const topicalRefillingRef = useRef(false);
   const topicalShufflesRef = useRef(0);
   const topicalLastTryRef = useRef(0); // throttles the return-home retry
+  const topicalRetryRef = useRef(null); // pending timer after a failed load
   const topicalSeedsRef = useRef(topicalSeeds);
   topicalSeedsRef.current = topicalSeeds;
   const idRef = useRef(0); // unique ids for tree nodes
@@ -90,6 +116,18 @@ export function useWander(user) {
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
+    // Paint the topical row from the last visit's cache right away — before
+    // auth has even resolved. The refresh that follows sign-in swaps in
+    // fresh doors the same quiet way the main row does.
+    const cached = readTopicalCache();
+    if (cached && cached.hand.length) {
+      topicalPoolRef.current = cached.pool;
+      setTopicalSeeds(cached.hand);
+      for (const s of cached.hand) {
+        topicalSeenRef.current.add(s.label);
+        dealtRef.current.add(s.label);
+      }
+    }
     loadSeeds();
     const params = new URLSearchParams(window.location.search);
     const door = params.get('door');
@@ -115,6 +153,8 @@ export function useWander(user) {
       topicalPoolRef.current = [];
       topicalSeenRef.current = new Set();
       topicalShufflesRef.current = 0;
+      clearTopicalCache();
+      clearTimeout(topicalRetryRef.current);
       wanderIdRef.current = null;
       wanderPromiseRef.current = null;
       serverIdsRef.current = new Map();
@@ -148,6 +188,17 @@ export function useWander(user) {
         if (r && (r.wander || r.door)) setResumeHint(r);
       })
       .catch((e) => shrug('resume', e));
+
+    // The mount-time hydration trusted the cache blindly; now that we know
+    // who this is, doors cached by a different account get wiped before the
+    // refresh runs.
+    const cachedTopical = readTopicalCache();
+    if (cachedTopical && cachedTopical.userId !== user.id) {
+      clearTopicalCache();
+      topicalPoolRef.current = [];
+      topicalSeenRef.current = new Set();
+      setTopicalSeeds([]);
+    }
 
     // One gated call, same shape as loadSeeds. The server checks whether any
     // topics are saved (they never travel to the client for this); an empty
@@ -339,13 +390,30 @@ export function useWander(user) {
     }
   }
 
+  // Remember the pool and the hand on screen, so the next visit paints them
+  // before any network happens. Owner-stamped: sign-in as someone else wipes
+  // it rather than showing another account's doors.
+  function persistTopical(hand) {
+    try {
+      if (!user || user.id == null) return;
+      localStorage.setItem(
+        TOPICAL_CACHE_KEY,
+        JSON.stringify({ userId: user.id, pool: topicalPoolRef.current.slice(-40), hand })
+      );
+    } catch {
+      /* storage full or blocked — the row just loads the slow way next time */
+    }
+  }
+
   async function loadTopicalSeeds(stillLive = () => true) {
     if (topicalRefillingRef.current) return;
     topicalRefillingRef.current = true;
     topicalLastTryRef.current = Date.now();
     try {
+      // 8 (the API cap) rather than 6: dealing 4 out of 6 left the pool two
+      // doors deep, which put a fresh generation behind nearly every shuffle.
       const exclude = [...dealtRef.current].slice(-RECENT_EXCLUDE);
-      const j = await api.generateTopicalSeeds({ count: 6, exclude });
+      const j = await api.generateTopicalSeeds({ count: 8, exclude });
       if (!stillLive()) return;
       if (j.seeds && j.seeds.length) {
         addToTopicalPool(j.seeds);
@@ -356,16 +424,32 @@ export function useWander(user) {
         }
         setTopicalSeeds(hand);
       }
-    } catch {
-      /* signed out, no topics, or quota — the row simply stays hidden */
+    } catch (e) {
+      // Free models fail routinely, and the return-home retry only re-fires
+      // on navigation — a failure while sitting on home would otherwise
+      // dead-end the row until the user left and came back. One quiet timer
+      // covers that. Quota errors don't retry: every try would charge again.
+      if (signedIn && !e.quota && !topicalSeedsRef.current.length) {
+        clearTimeout(topicalRetryRef.current);
+        topicalRetryRef.current = setTimeout(() => {
+          if (!topicalSeedsRef.current.length && !topicalRefillingRef.current) loadTopicalSeeds();
+        }, 31000);
+      }
     } finally {
       topicalRefillingRef.current = false;
     }
   }
 
+  // Whatever hand is showing is what the next visit paints first.
+  useEffect(() => {
+    if (topicalSeeds.length) persistTopical(topicalSeeds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [topicalSeeds]);
+
   // Settings saved (topics may have changed): forget the old pool and deal a
   // fresh hand, so the row reflects the new interests without a page reload.
   function refreshTopicalSeeds() {
+    clearTopicalCache(); // the old pool answers the old topics
     topicalPoolRef.current = [];
     topicalSeenRef.current = new Set();
     topicalShufflesRef.current = 0;
@@ -381,8 +465,11 @@ export function useWander(user) {
     topicalRefillingRef.current = true;
     try {
       const exclude = [...dealtRef.current].slice(-RECENT_EXCLUDE);
-      const j = await api.generateTopicalSeeds({ count: 6, exclude });
-      if (j.seeds && j.seeds.length) addToTopicalPool(j.seeds);
+      const j = await api.generateTopicalSeeds({ count: 8, exclude });
+      if (j.seeds && j.seeds.length) {
+        addToTopicalPool(j.seeds);
+        persistTopical(topicalSeedsRef.current);
+      }
     } catch {
       /* pool just cycles until the next attempt */
     } finally {

@@ -12,7 +12,7 @@ What is deployed, where it lives, and what to do when something looks wrong.
 | Database | `/home/io/curio/curio.db` | SQLite, WAL |
 | Public access | Tailscale Funnel → `127.0.0.1:5000` | permanent hostname, TLS at the edge |
 | Email | Gmail SMTP, app password, port 465 | hourly cron decides who is due |
-| Scheduled jobs | user crontab, see `deploy/crontab.example` | email, housekeeping, backup, chain repair |
+| Scheduled jobs | user crontab, see `deploy/crontab.example` | email, housekeeping, backup, chain tuning |
 | Backups | `/home/io/curio/backups/`, 14 days | nightly, gzipped, online-backup API |
 
 Config lives in `backend/.env` (mode 600) and nowhere else. It beats the
@@ -32,10 +32,11 @@ ls -lh ~/curio/backups | tail -3              # backups are landing
 ## When something is wrong
 
 **Pages fail to generate.** Almost always the model chain, not the code. The
-free catalogue retires models without notice.
+free catalogue retires models without notice. The nightly `tune-chain` cron
+should have caught it (check `tail ~/curio/logs/chain.log`); to fix it now:
 ```bash
-.venv/bin/flask bench-models --all-free       # what still works
-.venv/bin/flask refresh-chain --force         # adopt the fastest survivors
+.venv/bin/flask tune-chain                    # rank from production stats — fast, few live calls
+.venv/bin/flask refresh-chain --force         # last resort: full catalogue re-bench (expect rate limits)
 ```
 
 **Doors feel slow.** Don't guess — the database logs every call. Two

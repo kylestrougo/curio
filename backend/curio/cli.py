@@ -7,6 +7,7 @@ services. `cron` costs nothing when it isn't running.
 from __future__ import annotations
 
 import click
+import requests
 from flask.cli import with_appcontext
 
 from . import pagecache, prompts
@@ -207,7 +208,12 @@ def refresh_chain_command(force, repeat, top, dry_run):
         return
 
     click.echo("chain is dead — rebuilding from the catalogue" if not force else "forced re-rank")
-    catalogue = [m["id"] for m in list_free_models()]
+    try:
+        catalogue = [m["id"] for m in list_free_models()]
+    except requests.RequestException as exc:
+        # A DNS blip at 4am must be one log line, not a traceback in chain.log.
+        click.echo(f"catalogue unreachable ({type(exc).__name__}) — leaving the chain alone")
+        raise SystemExit(1)
     if not catalogue:
         click.echo("catalogue returned nothing — leaving the chain alone")
         raise SystemExit(1)
@@ -219,6 +225,175 @@ def refresh_chain_command(force, repeat, top, dry_run):
         raise SystemExit(1)
 
     new = [mid for _, mid, _ in ranked[:top]]
+    if new == current:
+        click.echo("no change")
+        return
+    if dry_run:
+        click.echo(f"would set: {' → '.join(new)}")
+        return
+    set_config_json(CONFIG_KEY_CHAIN, new)
+    click.echo(f"chain updated: {' → '.join(new)}")
+
+
+# ── self-tuning chain ───────────────────────────────────────────────────
+#
+# refresh-chain (above) stays as the manual rebuild tool; tune-chain is what
+# cron runs daily. It ranks models from model_stats — the production record
+# of every call — and spends at most a handful of paced live probes on
+# discovery, never a catalogue-wide bench. The incident that motivated it:
+# the chain head was retired upstream (404 on every call) for days while the
+# stats table showed a 95%-ok, 1.2s model sitting right there, and the
+# whole-catalogue bench that might have fixed it rate-limited itself into
+# adopting nothing.
+
+TUNE_PROBE_BUDGET = 6        # most live calls one run may spend
+TUNE_PROBE_PAUSE_S = 4.0     # gap between probes, to stay under free-tier limits
+TUNE_MIN_CALLS = 3           # evidence needed before a model can be ranked
+TUNE_MIN_OK_RATE = 0.6       # below this a model is a liability, not a backup
+TUNE_INCUMBENT_BONUS = 0.75  # incumbents' p50 is scaled by this: hysteresis,
+                             # so the order doesn't churn on day-to-day noise
+
+
+def _tune_window(hours: int) -> dict[str, dict]:
+    """model → {calls, ok, lat: [...]} over the trailing window."""
+    rows = query(
+        "SELECT model, ok, latency_ms FROM model_stats "
+        "WHERE created_at >= datetime('now', ?)",
+        (f"-{int(hours)} hours",),
+    )
+    out: dict[str, dict] = {}
+    for r in rows:
+        s = out.setdefault(r["model"], {"calls": 0, "ok": 0, "lat": []})
+        s["calls"] += 1
+        if r["ok"]:
+            s["ok"] += 1
+            if r["latency_ms"] is not None:
+                s["lat"].append(r["latency_ms"])
+    return out
+
+
+def _merge_probe(window: dict, model: str, ok: bool, latency_ms) -> None:
+    s = window.setdefault(model, {"calls": 0, "ok": 0, "lat": []})
+    s["calls"] += 1
+    if ok:
+        s["ok"] += 1
+        if latency_ms is not None:
+            s["lat"].append(latency_ms)
+
+
+def _rank_chain(stats: dict, recent: dict, current: list, top: int) -> list | None:
+    """Order the models the evidence trusts, or None when it's too thin.
+
+    A model qualifies on the wider window (enough calls, decent success rate)
+    but a fresh unbroken run of failures disqualifies it no matter how good it
+    looked earlier — that is the retired-model case, where three days of
+    glowing history hide a model that died this morning.
+    """
+    eligible = []
+    for model, s in stats.items():
+        if s["calls"] < TUNE_MIN_CALLS or s["ok"] / s["calls"] < TUNE_MIN_OK_RATE:
+            continue
+        r = recent.get(model)
+        if r and r["calls"] >= TUNE_MIN_CALLS and r["ok"] == 0:
+            continue
+        p50 = _pctl(sorted(s["lat"]), 0.5)
+        if p50 is None:
+            continue
+        bonus = TUNE_INCUMBENT_BONUS if model in current else 1.0
+        eligible.append((p50 * bonus, model))
+    if len(eligible) < 2:
+        # One model is not a chain, and an empty one makes every tap fail.
+        return None
+    eligible.sort()
+    return [m for _, m in eligible[:top]]
+
+
+def _probe_targets(current: list, stats: dict, catalogue: list, day: int,
+                   budget: int = TUNE_PROBE_BUDGET) -> list:
+    """Who deserves a live call today: starving incumbents, then the rotation.
+
+    Incumbents the users haven't exercised enough to rank go first — a backup
+    model earns its place by being checked, not by being grandfathered in.
+    The catalogue rotation's offset advances one model per day while each run
+    probes several, so consecutive days overlap: a healthy newcomer collects
+    the TUNE_MIN_CALLS it needs inside the ranking window instead of getting
+    one lonely call every few weeks.
+    """
+    targets = [m for m in current if stats.get(m, {}).get("calls", 0) < TUNE_MIN_CALLS]
+    pool = [m for m in sorted(set(catalogue)) if m not in current]
+    if pool:
+        off = day % len(pool)
+        pool = pool[off:] + pool[:off]
+    targets.extend(pool)
+    return targets[:budget]
+
+
+@click.command("tune-chain")
+@click.option("--top", type=int, default=3, help="How many models to keep in the chain.")
+@click.option("--window-hours", type=int, default=72, help="How much history to rank on.")
+@click.option("--dry-run", is_flag=True, help="Report what would change, change nothing.")
+@with_appcontext
+def tune_chain_command(top, window_hours, dry_run):
+    """Retune the model chain from production evidence. Intended for daily cron.
+
+    Every call the app makes already lands in model_stats, so ranking is
+    mostly a database read: keep the models that succeed, order by median
+    latency, with a bias toward the current chain so the order doesn't churn
+    on noise. A model that failed everything in the last day is evicted no
+    matter how good it once looked. Live probing is capped, paced, and
+    counts for nothing when the whole run gets rate-limited.
+    """
+    import time as _time
+    from datetime import date, datetime, timezone
+
+    from .llm import (
+        CONFIG_KEY_CHAIN, _record, generate_raw, list_free_models, set_config_json,
+    )
+
+    click.echo(f"tune-chain {datetime.now(timezone.utc):%Y-%m-%d %H:%M}Z")
+    current = get_chain()
+    click.echo(f"chain: {' → '.join(current) or '(empty)'}")
+
+    stats = _tune_window(window_hours)
+    recent = _tune_window(24)
+
+    try:
+        catalogue = [m["id"] for m in list_free_models()]
+    except requests.RequestException as exc:
+        # Stats can still rank what we already know; only discovery is lost.
+        catalogue = []
+        click.echo(f"catalogue unreachable ({type(exc).__name__}) — probing incumbents only")
+
+    targets = _probe_targets(current, stats, catalogue, date.today().toordinal())
+    probes = []
+    if targets:
+        system, user = prompts.page("Why do we dream?", "question", [], False, [])
+        for i, mid in enumerate(targets):
+            if i:
+                _time.sleep(TUNE_PROBE_PAUSE_S)
+            r = generate_raw(mid, system, user, intent="bench")
+            reason = _check_page_contract(r["parsed"]) if r["ok"] else None
+            ok = r["ok"] and reason is None
+            if reason:
+                # generate_raw logged the parse as a success; the contract
+                # failure needs its own row or tomorrow's ranking forgets it.
+                _record(mid, "bench", False, r["latencyMs"], f"off-contract: {reason}")
+            err = r["error"] or (f"off-contract: {reason}" if reason else "")
+            probes.append((mid, ok, r["latencyMs"], err))
+            detail = f"{r['latencyMs']}ms" if ok else (err or "failed")[:60]
+            click.echo(f"  {'✓' if ok else '✗'} probe {mid} — {detail}")
+
+    if probes and all(not ok and "429" in err for _, ok, _, err in probes):
+        click.echo("every probe was rate-limited — probes count for nothing this run")
+    else:
+        for mid, ok, ms, _err in probes:
+            _merge_probe(stats, mid, ok, ms)
+            _merge_probe(recent, mid, ok, ms)
+
+    new = _rank_chain(stats, recent, current, top)
+    if new is None:
+        click.echo("not enough working models in the evidence — leaving the chain alone")
+        raise SystemExit(1)
     if new == current:
         click.echo("no change")
         return
@@ -571,6 +746,7 @@ def init_app(app) -> None:
     app.cli.add_command(model_status_command)
     app.cli.add_command(bench_models_command)
     app.cli.add_command(refresh_chain_command)
+    app.cli.add_command(tune_chain_command)
     app.cli.add_command(warm_cache_command)
     app.cli.add_command(diagnose_doors_command)
     app.cli.add_command(bench_experiments_command)

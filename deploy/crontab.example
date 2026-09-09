@@ -22,18 +22,19 @@ FLASK=/home/io/curio/backend/.venv/bin/flask
 # Requires no sqlite3 CLI — the script drives the online backup API via python3.
 30 3 * * * /home/io/curio/deploy/backup.sh >> /home/io/curio/logs/backup.log 2>&1
 
-# Repair the model chain if it has rotted. The free catalogue churns without
-# notice — models get renamed and retired, and a chain that worked last week
-# can be entirely dead this week, which takes the whole app down with it.
+# Retune the model chain from production evidence. The free catalogue churns
+# without notice — models get renamed, retired, and rate-limited, and a chain
+# that worked last week can be dead or dog-slow this week.
 #
-# This checks the chain still works and only rebuilds it when it doesn't. It
-# will NOT reorder a working chain to chase a faster model: latency is the one
-# thing a benchmark can judge, and it says nothing about whether the pages are
-# any good. Choosing on quality stays a human decision, made from /admin.
+# tune-chain ranks models from model_stats (the record of every real call),
+# evicts anything that failed everything in the last day, and spends at most
+# ~6 paced live calls probing quiet backups and a rotating slice of the
+# catalogue. It never benchmarks the whole catalogue at once — that trips the
+# free tier's rate limits and measures nothing. `flask refresh-chain` remains
+# as a manual full-rebuild tool.
 #
-# Twice a week, at an hour nobody is reading. Costs ~3 free-tier calls when the
-# chain is healthy, which is the usual case.
-40 4 * * 1,4 cd $CURIO && $FLASK refresh-chain >> /home/io/curio/logs/chain.log 2>&1
+# Daily, at an hour nobody is reading.
+40 4 * * * cd $CURIO && $FLASK tune-chain >> /home/io/curio/logs/chain.log 2>&1
 
 # Pre-generate pages for starter doors that aren't cached yet, so a visitor's
 # first tap opens instantly. Sequential, small, and at a quiet hour: the cost

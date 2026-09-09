@@ -149,20 +149,25 @@ answers in two seconds with four buttons is worse than a slower one that gets it
 right, so off-contract models are excluded from the ranking rather than ranked
 badly. Sequential on purpose; parallel benchmarking just measures rate limits.
 
-**Keeping the chain alive by itself**
+**Keeping the chain optimal by itself**
 ```bash
-.venv/bin/flask refresh-chain --dry-run    # what it would do
+.venv/bin/flask tune-chain --dry-run    # what it would do
 ```
-`crontab.example` runs this twice a week. It verifies the chain still works and
-rebuilds it from the catalogue only when it doesn't — a dead chain takes the
-whole app down, and the catalogue churns enough that this happens. It will not
-reorder a working chain to chase a faster model, and it will not empty the chain
-if nothing passes: a stale chain can recover when a provider comes back, an
-empty one just fails every tap. `--force` re-ranks deliberately.
+`crontab.example` runs this daily. It ranks models from `model_stats` — the
+production record of every real call — keeping models with a decent success
+rate, ordering by median latency, and evicting anything that failed everything
+in the last day no matter how good its history looks (the retired-model case).
+The current chain gets a latency bonus so the order doesn't churn on noise. At
+most ~6 live calls are spent per run, one per model and paced: checking quiet
+backups still work, plus a slice of the catalogue that rotates daily so
+newcomers and recovered models get discovered within a few weeks. It never
+writes a chain with fewer than two working models, and a run where every probe
+is rate-limited judges nothing.
 
-Automating the *repair* but not the *promotion* is the point. Latency is the
-only thing a benchmark can judge, and it says nothing about whether the writing
-is any good — that stays a human call, made from `/admin`.
+A manually set chain (from `/admin`) lasts at most until the next nightly run —
+the tuner overwrites it when the evidence disagrees. `flask refresh-chain`
+remains as the manual full-rebuild tool (`--force` live-benchmarks the whole
+catalogue — expect rate limits; prefer tune-chain).
 
 **Test the email without waiting for cron:**
 ```bash

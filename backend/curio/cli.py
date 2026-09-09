@@ -247,6 +247,7 @@ def refresh_chain_command(force, repeat, top, dry_run):
 # adopting nothing.
 
 TUNE_PROBE_BUDGET = 6        # most live calls one run may spend
+TUNE_WIDE_WINDOW_HOURS = 168  # fallback lookback when the normal window is empty
 TUNE_PROBE_PAUSE_S = 4.0     # gap between probes, to stay under free-tier limits
 TUNE_MIN_CALLS = 3           # evidence needed before a model can be ranked
 TUNE_MIN_OK_RATE = 0.6       # below this a model is a liability, not a backup
@@ -391,6 +392,14 @@ def tune_chain_command(top, window_hours, dry_run):
             _merge_probe(recent, mid, ok, ms)
 
     new = _rank_chain(stats, recent, current, top)
+    if new is None and window_hours < TUNE_WIDE_WINDOW_HOURS:
+        # A model dropped from the chain stops accumulating stats, so after a
+        # bad stretch the recent window can be all failures while last week
+        # remembers exactly who was good. Look further back before declaring
+        # ignorance — anything stale it picks still answers to tomorrow's
+        # eviction rule if it turns out to be dead.
+        click.echo(f"thin evidence — widening the window to {TUNE_WIDE_WINDOW_HOURS}h")
+        new = _rank_chain(_tune_window(TUNE_WIDE_WINDOW_HOURS), recent, current, top)
     if new is None:
         click.echo("not enough working models in the evidence — leaving the chain alone")
         raise SystemExit(1)

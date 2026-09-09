@@ -104,6 +104,48 @@ class TestTheSeptemberIncident:
             assert get_chain() == ["laguna:free", "gemma:free", "slowbackup:free"]
 
 
+class TestTheWideWindow:
+    def test_good_models_older_than_the_window_are_still_found(
+        self, app, catalogue, probes
+    ):
+        # The day-after-the-incident case: the good model left the chain days
+        # ago so its stats aged out of the normal window, and the probe that
+        # would re-prove it is rate-limited. Last week still knows the answer.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["dead:free"])
+            seed("dead:free", fails=4, hours_ago=2)
+            seed("laguna:free", ok=40, fails=2, latency=1200, hours_ago=100)
+            seed("gemma:free", ok=8, fails=2, latency=6400, hours_ago=100)
+        catalogue([])
+        probes({"dead:free": "HTTP 429: slow down"})
+
+        res = run(app)
+
+        assert res.exit_code == 0
+        assert "widening the window" in res.output
+        with app.app_context():
+            assert get_chain() == ["laguna:free", "gemma:free"]
+
+    def test_widening_cannot_resurrect_a_model_that_died_today(
+        self, app, catalogue, probes
+    ):
+        # The wide window is a memory, not an amnesty: the 24h eviction rule
+        # still applies to whatever it remembers.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["dead:free"])
+            seed("dead:free", ok=40, latency=500, hours_ago=100)
+            seed("dead:free", fails=4, hours_ago=2)
+            seed("laguna:free", ok=40, latency=1200, hours_ago=100)
+            seed("gemma:free", ok=8, latency=6400, hours_ago=100)
+        catalogue([])
+        probes({})
+
+        run(app)
+
+        with app.app_context():
+            assert get_chain() == ["laguna:free", "gemma:free"]
+
+
 class TestHysteresis:
     def test_a_near_tie_keeps_the_incumbent_first(self, app, catalogue, probes):
         with app.app_context():

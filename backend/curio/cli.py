@@ -248,6 +248,7 @@ def refresh_chain_command(force, repeat, top, dry_run):
 
 TUNE_PROBE_BUDGET = 6        # most live calls one run may spend
 TUNE_WIDE_WINDOW_HOURS = 168  # fallback lookback when the normal window is empty
+TUNE_MAX_WINDOW_HOURS = 720   # last resort: all the history housekeeping keeps
 TUNE_PROBE_PAUSE_S = 4.0     # gap between probes, to stay under free-tier limits
 TUNE_MIN_CALLS = 3           # evidence needed before a model can be ranked
 TUNE_MIN_OK_RATE = 0.6       # below this a model is a liability, not a backup
@@ -256,14 +257,22 @@ TUNE_INCUMBENT_BONUS = 0.75  # incumbents' p50 is scaled by this: hysteresis,
 
 
 def _tune_window(hours: int) -> dict[str, dict]:
-    """model → {calls, ok, lat: [...]} over the trailing window."""
+    """model → {calls, ok, lat: [...]} over the trailing window.
+
+    Rate-limited calls are skipped entirely: a 429 measures the account's
+    quota, not the model, so it contributes neither a call nor a failure.
+    Counting them once let a benchmark storm drag the best model's ok-rate
+    under the bar and then evict it for failures that were never its own.
+    """
     rows = query(
-        "SELECT model, ok, latency_ms FROM model_stats "
+        "SELECT model, ok, latency_ms, error FROM model_stats "
         "WHERE created_at >= datetime('now', ?)",
         (f"-{int(hours)} hours",),
     )
     out: dict[str, dict] = {}
     for r in rows:
+        if not r["ok"] and "429" in (r["error"] or ""):
+            continue
         s = out.setdefault(r["model"], {"calls": 0, "ok": 0, "lat": []})
         s["calls"] += 1
         if r["ok"]:
@@ -386,20 +395,25 @@ def tune_chain_command(top, window_hours, dry_run):
 
     if probes and all(not ok and "429" in err for _, ok, _, err in probes):
         click.echo("every probe was rate-limited — probes count for nothing this run")
-    else:
-        for mid, ok, ms, _err in probes:
-            _merge_probe(stats, mid, ok, ms)
-            _merge_probe(recent, mid, ok, ms)
+    for mid, ok, ms, err in probes:
+        if not ok and "429" in err:
+            continue  # the account's limit, not the model's fault
+        _merge_probe(stats, mid, ok, ms)
+        _merge_probe(recent, mid, ok, ms)
 
+    # A model dropped from the chain stops accumulating stats, so after a bad
+    # stretch the recent window can be all failures while last week — or last
+    # month — remembers exactly who was good. Look further back before
+    # declaring ignorance: anything stale it picks still answers to the 24h
+    # eviction rule, and to tomorrow's run if it turns out to be dead.
     new = _rank_chain(stats, recent, current, top)
-    if new is None and window_hours < TUNE_WIDE_WINDOW_HOURS:
-        # A model dropped from the chain stops accumulating stats, so after a
-        # bad stretch the recent window can be all failures while last week
-        # remembers exactly who was good. Look further back before declaring
-        # ignorance — anything stale it picks still answers to tomorrow's
-        # eviction rule if it turns out to be dead.
-        click.echo(f"thin evidence — widening the window to {TUNE_WIDE_WINDOW_HOURS}h")
-        new = _rank_chain(_tune_window(TUNE_WIDE_WINDOW_HOURS), recent, current, top)
+    for wider in (TUNE_WIDE_WINDOW_HOURS, TUNE_MAX_WINDOW_HOURS):
+        if new is not None:
+            break
+        if window_hours >= wider:
+            continue
+        click.echo(f"thin evidence — widening the window to {wider}h")
+        new = _rank_chain(_tune_window(wider), recent, current, top)
     if new is None:
         click.echo("not enough working models in the evidence — leaving the chain alone")
         raise SystemExit(1)

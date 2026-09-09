@@ -22,7 +22,7 @@ GOOD_PAGE = {
 }
 
 
-def seed(model, ok=0, fails=0, latency=1000, hours_ago=2):
+def seed(model, ok=0, fails=0, latency=1000, hours_ago=2, error="HTTP 404: gone"):
     """Insert model_stats rows a given distance into the past."""
     for _ in range(ok):
         execute(
@@ -32,9 +32,9 @@ def seed(model, ok=0, fails=0, latency=1000, hours_ago=2):
         )
     for _ in range(fails):
         execute(
-            "INSERT INTO model_stats (model, intent, ok, latency_ms, created_at) "
-            "VALUES (?, 'page', 0, NULL, datetime('now', ?))",
-            (model, f"-{hours_ago} hours"),
+            "INSERT INTO model_stats (model, intent, ok, latency_ms, error, created_at) "
+            "VALUES (?, 'page', 0, NULL, ?, datetime('now', ?))",
+            (model, error, f"-{hours_ago} hours"),
         )
 
 
@@ -144,6 +144,105 @@ class TestTheWideWindow:
 
         with app.app_context():
             assert get_chain() == ["laguna:free", "gemma:free"]
+
+    def test_month_old_evidence_is_the_last_resort(self, app, catalogue, probes):
+        # The full Pi state of 2026-09-09 18:30Z, as a regression test: the
+        # good models' record is older than even the 168h window, the chain
+        # head is truly dead, and the favourite carries fresh 429 scars from
+        # a benchmark storm. The 429s must count for nothing and the 720h
+        # window must find the answer — with zero successful live calls.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["dead:free"])
+            seed("dead:free", fails=4, hours_ago=2)
+            seed("laguna:free", ok=40, fails=2, latency=1200, hours_ago=200)
+            seed("laguna:free", fails=3, hours_ago=2, error="HTTP 429: Provider returned error")
+            seed("gemma:free", ok=8, fails=2, latency=6400, hours_ago=200)
+        catalogue([])
+        probes({"dead:free": "HTTP 429: slow down"})
+
+        res = run(app)
+
+        assert res.exit_code == 0
+        assert "widening the window to 720h" in res.output
+        with app.app_context():
+            assert get_chain() == ["laguna:free", "gemma:free"]
+
+    def test_widening_stops_at_the_first_window_that_answers(
+        self, app, catalogue, probes
+    ):
+        # 168h data must be ranked as 168h data, not fall through to 720h
+        # where a month-old relic could outrank it.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["dead:free"])
+            seed("dead:free", fails=4, hours_ago=2)
+            seed("a:free", ok=5, latency=2000, hours_ago=100)
+            seed("b:free", ok=5, latency=3000, hours_ago=100)
+            seed("relic:free", ok=20, latency=100, hours_ago=500)
+        catalogue([])
+        probes({})
+
+        res = run(app)
+
+        assert "widening the window to 168h" in res.output
+        assert "720h" not in res.output
+        with app.app_context():
+            assert get_chain() == ["a:free", "b:free"]
+
+
+class TestRateLimitsAreNotEvidence:
+    def test_429_rows_neither_downrate_nor_evict(self, app, catalogue, probes):
+        # Three fresh 429s used to trip the eviction rule (>=3 calls, 0 ok)
+        # against the very model the account was rate-limited while probing.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["a:free"])
+            seed("a:free", ok=10, latency=1000, hours_ago=2)
+            seed("b:free", ok=10, latency=500, hours_ago=30)
+            seed("b:free", fails=3, hours_ago=2, error="HTTP 429: Provider returned error")
+        catalogue([])
+        probes({})
+
+        run(app)
+
+        with app.app_context():
+            assert get_chain() == ["b:free", "a:free"]
+
+    def test_429_rows_alone_cannot_make_a_model_eligible(
+        self, app, catalogue, probes
+    ):
+        # They are nothing, not something: skipped entirely, not counted as
+        # calls that could satisfy the minimum-evidence bar.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["a:free"])
+            seed("a:free", ok=10, latency=1000, hours_ago=2)
+            seed("x:free", fails=10, hours_ago=2, error="HTTP 429: slow down")
+        catalogue([])
+        probes({})
+
+        res = run(app)
+
+        assert res.exit_code == 1  # a alone is not a chain
+        with app.app_context():
+            assert get_chain() == ["a:free"]
+
+    def test_a_rate_limited_probe_is_not_merged_as_evidence(
+        self, app, catalogue, probes
+    ):
+        # A newcomer one call short of eligibility gets probed; the probe
+        # 429s. That must leave it one call short — merging the 429 as a
+        # plain failure would hand it its third call and a seat in the chain.
+        with app.app_context():
+            set_config_json(CONFIG_KEY_CHAIN, ["a:free"])
+            seed("a:free", ok=5, latency=1000, hours_ago=2)
+            seed("b:free", ok=2, latency=3000, hours_ago=30)
+        catalogue(["b:free"])
+        probes({"b:free": "HTTP 429: slow down"})
+
+        res = run(app)
+
+        assert probes.calls == ["b:free"]
+        assert res.exit_code == 1  # b stayed two calls short of a verdict
+        with app.app_context():
+            assert get_chain() == ["a:free"]
 
 
 class TestHysteresis:

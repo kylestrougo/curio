@@ -28,7 +28,9 @@ per tap remains law.**
 ## Generation
 
 All generation endpoints are rate-limited (per-IP for anonymous, per-user daily cap for
-signed-in) and return `429` with `{"error":"quota"}` when a cap is hit.
+signed-in) and return `429` with `{"error":"quota"}` when a cap is hit. A failed
+generation (`502` `generation_failed`) refunds its unit — only generations that
+delivered something count against the cap, so client retries of failures are free.
 
 ### `POST /api/seeds`
 Home doors, and the shuffle pool restock.

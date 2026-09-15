@@ -386,6 +386,33 @@ class TestGeneration:
         )
         assert client.post("/api/recap", json={"path": ["a", "b"]}).status_code == 502
 
+    def test_failed_generation_refunds_the_quota_unit(self, client, app, monkeypatch):
+        """The gate charges before generating, but a walked-out chain delivers
+        nothing — same refund as a failed stream. The client quietly retries
+        502s now, and without the refund each quiet retry would eat quota."""
+        def dead(*a, **k):
+            raise llm.LLMError("dead")
+
+        monkeypatch.setattr(llm, "_post", dead)
+        r = client.post("/api/page", json={"label": "x", "kind": "topic"})
+        assert r.status_code == 502
+        assert r.get_json()["error"] == "generation_failed"
+        with app.app_context():
+            from curio.db import query
+            row = query(
+                "SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True
+            )
+            assert row["count"] == 0
+
+    def test_successful_generation_keeps_the_charge(self, client, app, stub_llm):
+        assert client.post("/api/page", json={"label": "x", "kind": "topic"}).status_code == 200
+        with app.app_context():
+            from curio.db import query
+            row = query(
+                "SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True
+            )
+            assert row["count"] == 1
+
     def test_ask_needs_a_question(self, client, stub_llm):
         assert client.post("/api/ask", json={"title": "t", "said": "s"}).status_code == 400
 

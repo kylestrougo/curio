@@ -61,20 +61,25 @@ async function request(path, { method = 'GET', body } = {}) {
   return data === null ? {} : data;
 }
 
-// Generation is the slow, flaky path: free models rate-limit and hiccup. The
-// prototype took one quiet retry before surfacing anything; keep that, but never
-// retry a quota — a second ask can't buy back a spent daily cap — and never
-// retry `generation_failed`, which already means the whole server-side model
-// chain was walked. One LLM call per tap stays law.
-async function generate(path, body) {
-  try {
-    return await request(path, { method: 'POST', body });
-  } catch (e) {
-    if (e instanceof ApiError && !e.quota && e.code !== 'generation_failed' && e.status >= 500) {
-      await new Promise((r) => setTimeout(r, 2000));
-      return request(path, { method: 'POST', body });
+// Generation is the slow, flaky path: free models rate-limit and hiccup in
+// bursts. This wrapper quietly re-asks before surfacing anything — including
+// `generation_failed`, which means the whole server-side chain was walked and
+// used to be final; in practice a fresh walk a few seconds later routinely
+// succeeds (that's exactly what everyone's manual "Try again" taps proved).
+// The pauses grow so the rate limits get air. Never retry a quota — a second
+// ask can't buy back a spent daily cap — and failed generations are refunded
+// server-side, so the quiet retries don't eat into it either.
+const RETRY_PAUSES_MS = [1500, 3500];
+
+async function generate(path, body, tries = 3) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await request(path, { method: 'POST', body });
+    } catch (e) {
+      const transient = e instanceof ApiError && !e.quota && (e.status === 0 || e.status >= 500);
+      if (!transient || attempt + 1 >= tries) throw e;
+      await new Promise((r) => setTimeout(r, RETRY_PAUSES_MS[Math.min(attempt, RETRY_PAUSES_MS.length - 1)]));
     }
-    throw e;
   }
 }
 
@@ -195,14 +200,18 @@ export async function streamPage(body, onChunk) {
 }
 
 // → { seeds: [{label, type}] }
+// Seeds load in the background and fail silently into the static pool, so a
+// single attempt: camping on retries would hammer the free tier with nothing
+// user-visible at stake.
 export function generateSeeds({ count = 4, exclude = [] } = {}) {
-  return generate('/api/seeds', { count, exclude });
+  return generate('/api/seeds', { count, exclude }, 1);
 }
 
 // → { seeds: [{label, type}] } — anchored to the signed-in user's saved
 // interests, which stay server-side; {seeds: []} when none are configured.
+// Single attempt like generateSeeds: the topical row has its own retry cadence.
 export function generateTopicalSeeds({ count = 6, exclude = [] } = {}) {
-  return generate('/api/seeds/topical', { count, exclude });
+  return generate('/api/seeds/topical', { count, exclude }, 1);
 }
 
 // → { title, blurb, buttons: [{label, type}] }  (exactly 5 buttons)

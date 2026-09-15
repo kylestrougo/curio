@@ -129,6 +129,12 @@ def _generate(system: str, user: str, intent: str, validate=None):
         return generate(system, user, intent=intent, validate=validate), None
     except LLMError as exc:
         log.error("generation failed for %s: %s", intent, exc)
+        # The gate charged up front and the caller got nothing for the unit;
+        # give it back, exactly as the stream endpoints do. The client quietly
+        # retries these failures — without the refund each retry would eat
+        # quota, and a user near the cap would see the quota message for what
+        # was really a model outage.
+        refund_generation()
         return None, _err(
             "generation_failed",
             "That door didn't open. Every model in the chain came back empty.",

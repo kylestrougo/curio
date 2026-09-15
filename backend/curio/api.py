@@ -533,7 +533,9 @@ def recap():
         return _err("bad_request", "No path to close.", 400)
 
     system, user = prompts.recap(path)
-    parsed, error = _generate(system, user, "recap")
+    # Without the validator a model answering {"synthesis": ""} would be
+    # accepted — and now that recaps can be saved, kept.
+    parsed, error = _generate(system, user, "recap", validate=_has_text("synthesis"))
     if error:
         return error
     return jsonify({
@@ -589,7 +591,7 @@ def create_wander():
 def list_wanders():
     rows = query(
         """
-        SELECT w.id, w.started_at, w.closed_at,
+        SELECT w.id, w.started_at, w.closed_at, w.recap_json, w.recap_saved,
                COUNT(p.id) AS page_count,
                MIN(p.id)   AS first_page,
                MAX(p.id)   AS last_page
@@ -611,6 +613,10 @@ def list_wanders():
                 (r["first_page"], r["last_page"]),
             )
         }
+        try:
+            recap_data = json.loads(r["recap_json"]) if r["recap_json"] else None
+        except ValueError:
+            recap_data = None
         out.append({
             "id": r["id"],
             "startedAt": r["started_at"],
@@ -618,6 +624,8 @@ def list_wanders():
             "pageCount": r["page_count"],
             "firstTitle": titles.get(r["first_page"]),
             "lastTitle": titles.get(r["last_page"]),
+            "recap": recap_data,
+            "recapSaved": bool(r["recap_saved"]),
         })
     return jsonify({"wanders": out})
 
@@ -745,6 +753,49 @@ def close_wander(wander_id: int):
         "UPDATE wanders SET closed_at = datetime('now'), recap_json = ? WHERE id = ?",
         (json.dumps(recap_data) if recap_data else None, wander_id),
     )
+    return jsonify({"ok": True})
+
+
+def _clean_recap(raw) -> dict | None:
+    """The recap as the client sends it, clamped to the shapes we generate."""
+    if not isinstance(raw, dict):
+        return None
+    synthesis = _clean_text(raw.get("synthesis"), 1500)
+    if not synthesis:
+        return None
+    return {
+        "path": _clean_list(raw.get("path"), limit=40, item_limit=200),
+        "synthesis": synthesis,
+        "thread": _clean_text(raw.get("thread"), 300),
+    }
+
+
+@bp.post("/wanders/<int:wander_id>/save-recap")
+@login_required
+def save_recap(wander_id: int):
+    w = _own_wander(wander_id)
+    if not w:
+        return _err("not_found", "No such wander.", 404)
+    # The close call persists the recap fire-and-forget; if it hasn't landed
+    # (or failed), the copy in the save request fills the gap. A recap the
+    # close already stored wins — it is the same content, sent first.
+    recap_data = _clean_recap(_body().get("recap"))
+    if not w["recap_json"] and recap_data:
+        execute(
+            "UPDATE wanders SET recap_saved = 1, recap_json = ? WHERE id = ?",
+            (json.dumps(recap_data), wander_id),
+        )
+    else:
+        execute("UPDATE wanders SET recap_saved = 1 WHERE id = ?", (wander_id,))
+    return jsonify({"ok": True}), 201
+
+
+@bp.delete("/wanders/<int:wander_id>/save-recap")
+@login_required
+def unsave_recap(wander_id: int):
+    if not _own_wander(wander_id):
+        return _err("not_found", "No such wander.", 404)
+    execute("UPDATE wanders SET recap_saved = 0 WHERE id = ?", (wander_id,))
     return jsonify({"ok": True})
 
 

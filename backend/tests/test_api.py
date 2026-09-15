@@ -132,6 +132,79 @@ class TestOwnershipIsolation:
             assert call().status_code == 401
 
 
+class TestSavedRecaps:
+    """'Save & close': the kept-recap flag and the recap it protects."""
+
+    RECAP = {"path": ["a", "b", "c"], "synthesis": "The thread that ran through.", "thread": "What next?"}
+
+    def _wander(self, client, email="w@b.com"):
+        client.post("/api/auth/logout")
+        client.post("/api/auth/signup", json={"email": email, "password": "longenoughpw"})
+        return client.post("/api/wanders").get_json()["id"]
+
+    def _listed(self, client, wander_id):
+        rows = client.get("/api/wanders").get_json()["wanders"]
+        return next(w for w in rows if w["id"] == wander_id)
+
+    def test_requires_auth(self, client):
+        assert client.post("/api/wanders/1/save-recap", json={}).status_code == 401
+        assert client.delete("/api/wanders/1/save-recap").status_code == 401
+
+    def test_cannot_touch_another_users_recap(self, client):
+        wander = self._wander(client, "one@b.com")
+        self._wander(client, "two@b.com")
+        assert client.post(f"/api/wanders/{wander}/save-recap", json={}).status_code == 404
+        assert client.delete(f"/api/wanders/{wander}/save-recap").status_code == 404
+
+    def test_save_flags_the_recap_the_close_stored(self, client):
+        wander = self._wander(client)
+        client.post(f"/api/wanders/{wander}/close", json={"recap": self.RECAP})
+        assert self._listed(client, wander)["recapSaved"] is False
+
+        assert client.post(f"/api/wanders/{wander}/save-recap", json={}).status_code == 201
+        row = self._listed(client, wander)
+        assert row["recapSaved"] is True
+        assert row["recap"] == self.RECAP
+        # The single-wander read agrees.
+        assert client.get(f"/api/wanders/{wander}").get_json()["recap"] == self.RECAP
+
+    def test_unsave_clears_the_flag_but_keeps_the_recap(self, client):
+        wander = self._wander(client)
+        client.post(f"/api/wanders/{wander}/close", json={"recap": self.RECAP})
+        client.post(f"/api/wanders/{wander}/save-recap", json={})
+
+        assert client.delete(f"/api/wanders/{wander}/save-recap").status_code == 200
+        row = self._listed(client, wander)
+        assert row["recapSaved"] is False
+        assert row["recap"] == self.RECAP  # /api/resume still needs it
+        # Deleting again is a quiet no-op, like DELETE /api/saves.
+        assert client.delete(f"/api/wanders/{wander}/save-recap").status_code == 200
+
+    def test_save_body_fills_a_recap_the_close_never_stored(self, client):
+        # The close persist is fire-and-forget on the client; if it failed,
+        # the copy in the save request is all there is.
+        wander = self._wander(client)
+        client.post(f"/api/wanders/{wander}/save-recap", json={"recap": self.RECAP})
+        row = self._listed(client, wander)
+        assert row["recapSaved"] is True
+        assert row["recap"] == self.RECAP
+
+    def test_close_stored_recap_wins_over_the_save_body(self, client):
+        wander = self._wander(client)
+        client.post(f"/api/wanders/{wander}/close", json={"recap": self.RECAP})
+        other = {"path": ["x"], "synthesis": "Something else entirely.", "thread": ""}
+        client.post(f"/api/wanders/{wander}/save-recap", json={"recap": other})
+        assert self._listed(client, wander)["recap"] == self.RECAP
+
+    def test_garbage_body_sets_the_flag_and_nothing_else(self, client):
+        wander = self._wander(client)
+        r = client.post(f"/api/wanders/{wander}/save-recap", json={"recap": {"synthesis": ""}})
+        assert r.status_code == 201
+        row = self._listed(client, wander)
+        assert row["recapSaved"] is True
+        assert row["recap"] is None  # the client filters flag-without-recap out
+
+
 class TestGeneration:
     def test_page(self, client, stub_llm):
         r = client.post("/api/page", json={"label": "Why do we dream?", "kind": "question"})
@@ -301,6 +374,17 @@ class TestGeneration:
             "/api/ask", json={"title": "t", "said": "s", "question": "why?"}
         ).get_json()["answer"]
         assert client.post("/api/recap", json={"path": ["a", "b"]}).get_json()["thread"]
+
+    def test_recap_rejects_an_empty_synthesis(self, client, monkeypatch):
+        # A model answering {"synthesis": ""} must walk the chain like any
+        # other bad reply — recaps can be saved now, so an empty one would
+        # be kept forever.
+        import json as _json
+
+        monkeypatch.setattr(
+            llm, "_post", lambda *a, **k: _json.dumps({"synthesis": "", "thread": "x?"})
+        )
+        assert client.post("/api/recap", json={"path": ["a", "b"]}).status_code == 502
 
     def test_ask_needs_a_question(self, client, stub_llm):
         assert client.post("/api/ask", json={"title": "t", "said": "s"}).status_code == 400

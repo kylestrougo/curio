@@ -76,6 +76,7 @@ export function useWander(user) {
   const [moreLoading, setMoreLoading] = useState(false);
   const [qaLoading, setQaLoading] = useState(false);
   const [recap, setRecap] = useState(null); // {path, synthesis, thread} | "loading" | {failed:msg}
+  const [wanderRecaps, setWanderRecaps] = useState([]); // saved recaps of closed wanders, for the Saved view
   const [resumeHint, setResumeHint] = useState(null); // {wander, door} — shown once, quietly
   const [topicalSeeds, setTopicalSeeds] = useState([]); // doors near the user's saved interests
   const [pendingDoor, setPendingDoor] = useState(null); // {label, type, surprise} while a page loads
@@ -141,6 +142,25 @@ export function useWander(user) {
     if (scrollRef.current) scrollRef.current.scrollTo(0, 0);
   }, [view, trail.length]);
 
+  // The Saved view also shows the recaps kept with "Save & close". Refreshed
+  // each time the view opens — the list changes rarely and the payload is small.
+  useEffect(() => {
+    if (view !== 'saved' || !signedIn) return;
+    let live = true;
+    api
+      .listWanders()
+      .then((r) => {
+        if (!live) return;
+        setWanderRecaps(
+          (r.wanders || []).filter((x) => x.recapSaved && x.recap && x.recap.synthesis)
+        );
+      })
+      .catch((e) => shrug('closed wanders', e));
+    return () => {
+      live = false;
+    };
+  }, [view, signedIn]);
+
   // Signing in pulls down the durable half: saved pages, and the quiet
   // "you left off at ___". Signing out puts the screen back to anonymous.
   useEffect(() => {
@@ -148,6 +168,7 @@ export function useWander(user) {
 
     if (!signedIn) {
       setSaved([]);
+      setWanderRecaps([]);
       setResumeHint(null);
       setTopicalSeeds([]);
       topicalPoolRef.current = [];
@@ -575,6 +596,7 @@ export function useWander(user) {
     setLoading(false);
     setError(null);
     clearPageExtras();
+    setRecap(null); // leaving via the header must not strand a stale recap
     if (i < 0) {
       setView('home');
       return;
@@ -702,6 +724,27 @@ export function useWander(user) {
   function keepWandering() {
     setRecap(null);
     setView(trail.length ? 'page' : 'home');
+  }
+
+  // "Save & close": keep the recap where the Saved view can find it, then
+  // leave the way Start fresh does. The wander row already exists server-side;
+  // the recap rides along in case the close's fire-and-forget persist failed.
+  async function saveAndClose() {
+    const done = recap && recap.synthesis ? recap : null;
+    const wid = wanderIdRef.current;
+    if (signedIn && wid != null && done) {
+      try {
+        await api.saveRecap(wid, done);
+      } catch (e) {
+        shrug('saving the recap', e); // the user asked to leave — leave anyway
+      }
+    }
+    startFresh();
+  }
+
+  function removeRecap(id) {
+    setWanderRecaps((rs) => rs.filter((x) => x.id !== id));
+    api.unsaveRecap(id).catch((e) => shrug('unsave recap', e));
   }
 
   function startFresh() {
@@ -904,6 +947,44 @@ export function useWander(user) {
     }
   }
 
+  // Share a recap the way a page is shared: frozen as a snapshot, viewable
+  // with no account and no quota. The doors that built the summary ride along
+  // as buttons, and the thread as a question — everything stays walkable.
+  async function shareRecap(r) {
+    if (!signedIn || !r || !r.synthesis) return null;
+    const path = r.path || [];
+    const doors = path.slice(0, r.thread ? 4 : 5).map((t) => ({ label: t, type: 'topic' }));
+    if (r.thread) doors.push({ label: r.thread, type: 'question' });
+    const title =
+      path.length > 1 ? `${path[0]} › … › ${path[path.length - 1]}` : path[0] || 'A wander, closed';
+    try {
+      const res = await api.createShare({
+        title,
+        blurb: r.synthesis,
+        kind: 'topic',
+        more: [],
+        qa: [],
+        buttons: doors,
+        terms: [],
+      });
+      const url = `${window.location.origin}/s/${res.token}`;
+      if (navigator.share) {
+        try {
+          await navigator.share({ title, url });
+          return 'shared';
+        } catch (e) {
+          if (e && e.name === 'AbortError') return null;
+          // share sheet unavailable after all — fall through to the clipboard
+        }
+      }
+      await navigator.clipboard.writeText(url);
+      return 'copied';
+    } catch (e) {
+      shrug('share', e);
+      return null;
+    }
+  }
+
   const isSaved = !!(current && saved.some((p) => p.title === current.title));
 
   return {
@@ -916,6 +997,7 @@ export function useWander(user) {
     topicalSeeds,
     saved,
     isSaved,
+    wanderRecaps,
     loading,
     error,
     ask,
@@ -948,6 +1030,9 @@ export function useWander(user) {
     closeWander,
     keepWandering,
     startFresh,
+    saveAndClose,
+    removeRecap,
+    shareRecap,
     toggleSave,
     sharePage,
     submitAsk,

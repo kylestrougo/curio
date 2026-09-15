@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS wanders (
     user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     started_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     closed_at   TEXT,
-    recap_json  TEXT
+    recap_json  TEXT,
+    recap_saved INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_wanders_user ON wanders(user_id, started_at DESC);
 

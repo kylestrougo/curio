@@ -62,6 +62,7 @@ def init_db() -> None:
     # Columns added after first deploy (see _ensure_column):
     _ensure_column(db, "email_prefs", "timezone", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(db, "page_cache", "terms_json", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(db, "wanders", "recap_saved", "INTEGER NOT NULL DEFAULT 0")
     # One-time data migrations, each behind a claimed flag (see _once).
     if _once(db, "migrated:email_on_by_default"):
         # Emails became opt-out: flip everyone on once, move the untouched

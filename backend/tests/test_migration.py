@@ -15,7 +15,7 @@ from curio import create_app
 from curio.config import Config
 
 # Tables exactly as they shipped, before the post-launch columns existed
-# (email_prefs.timezone, page_cache.terms_json).
+# (email_prefs.timezone, page_cache.terms_json, wanders.recap_saved).
 _V1_EMAIL_PREFS = """
 CREATE TABLE users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,6 +23,13 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE wanders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    closed_at   TEXT,
+    recap_json  TEXT
 );
 CREATE TABLE email_prefs (
     user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -76,6 +83,7 @@ def _columns(path, table):
 
 def test_boot_adds_timezone_to_an_existing_database(old_db_path):
     assert "timezone" not in _columns(old_db_path, "email_prefs")
+    assert "recap_saved" not in _columns(old_db_path, "wanders")
 
     class Cfg(Config):
         DATABASE = old_db_path
@@ -85,6 +93,7 @@ def test_boot_adds_timezone_to_an_existing_database(old_db_path):
     create_app(Cfg)  # boot runs init_db, which runs the guarded ALTERs
     assert "timezone" in _columns(old_db_path, "email_prefs")
     assert "terms_json" in _columns(old_db_path, "page_cache")
+    assert "recap_saved" in _columns(old_db_path, "wanders")
     # Whole new tables need no ALTER — CREATE TABLE IF NOT EXISTS covers them.
     assert "token" in _columns(old_db_path, "shared_pages")
 

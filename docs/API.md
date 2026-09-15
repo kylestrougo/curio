@@ -148,11 +148,13 @@ into rows and returns its own `id`, which the client stores as `serverId`.
 | Method | Path | Body → Response |
 |---|---|---|
 | `POST` | `/api/wanders` | `{}` → `{id, startedAt}` |
-| `GET` | `/api/wanders` | → `{wanders: [{id, startedAt, closedAt, pageCount, firstTitle, lastTitle}]}` |
+| `GET` | `/api/wanders` | → `{wanders: [{id, startedAt, closedAt, pageCount, firstTitle, lastTitle, recap, recapSaved}]}` |
 | `GET` | `/api/wanders/:id` | → `{id, startedAt, closedAt, recap, pages: [page]}` |
 | `POST` | `/api/wanders/:id/pages` | `{clientNodeId, parentClientNodeId, kind, title, blurb, buttons}` → `{id}` |
 | `PATCH` | `/api/pages/:id` | `{more?: [...], qa?: [...]}` → `{ok}` |
 | `POST` | `/api/wanders/:id/close` | `{recap: {path, synthesis, thread}}` → `{ok}` |
+| `POST` | `/api/wanders/:id/save-recap` | `{recap?}` → `{ok}` — marks the recap kept; the optional body fills `recap` only if the close never stored one |
+| `DELETE` | `/api/wanders/:id/save-recap` | → `{ok}` — unmarks it (the recap itself stays) |
 | `GET` | `/api/saves` | → `{saves: [page]}` |
 | `POST` | `/api/saves` | `{pageId}` → `{ok}` |
 | `DELETE` | `/api/saves/:pageId` | → `{ok}` |

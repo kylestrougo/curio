@@ -273,6 +273,18 @@ export function closeWander(id, recap) {
   return request(`/api/wanders/${encodeURIComponent(id)}/close`, { method: 'POST', body: { recap } });
 }
 
+// The recap travels along in case the close's fire-and-forget persist hasn't landed.
+export function saveRecap(wanderId, recap) {
+  return request(`/api/wanders/${encodeURIComponent(wanderId)}/save-recap`, {
+    method: 'POST',
+    body: { recap },
+  });
+}
+
+export function unsaveRecap(wanderId) {
+  return request(`/api/wanders/${encodeURIComponent(wanderId)}/save-recap`, { method: 'DELETE' });
+}
+
 export function listSaves() {
   return request('/api/saves');
 }

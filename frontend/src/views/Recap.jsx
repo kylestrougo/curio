@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Loading from '../components/Loading.jsx';
 
 export default function Recap({ w }) {
-  const { recap, setRecap, openPage, closeWander, keepWandering, startFresh } = w;
+  const { recap, setRecap, openPage, closeWander, keepWandering, startFresh, saveAndClose, shareRecap, signedIn } = w;
   const failed = recap && recap.failed;
+  const [copied, setCopied] = useState(false);
+
+  async function share() {
+    if ((await shareRecap(recap)) === 'copied') {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }
 
   return (
     <div className="recap">
@@ -44,6 +52,16 @@ export default function Recap({ w }) {
             </div>
           )}
           <div className="recap-actions">
+            {signedIn && (
+              <button className="save on" onClick={saveAndClose}>
+                ✦ Save &amp; close
+              </button>
+            )}
+            {signedIn && (
+              <button className="save" onClick={share}>
+                {copied ? 'Link copied' : 'Share'}
+              </button>
+            )}
             <button className="save" onClick={keepWandering}>
               Keep wandering
             </button>

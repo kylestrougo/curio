@@ -138,9 +138,17 @@ export function useWander(user) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
+  // Back to the top when the view changes; navigation within the page view
+  // scrolls explicitly at launch instead (scrollTop() in openPage and the
+  // crumb/tree jumps). Keying this off trail.length used to yank the reader
+  // to the top at the exact moment a streamed page landed, mid-read.
+  const scrollTop = () => {
     if (scrollRef.current) scrollRef.current.scrollTo(0, 0);
-  }, [view, trail.length]);
+  };
+  useEffect(() => {
+    scrollTop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   // The Saved view also shows the recaps kept with "Save & close". Refreshed
   // each time the view opens — the list changes rarely and the payload is small.
@@ -536,6 +544,7 @@ export function useWander(user) {
     clearPageExtras();
     setResumeHint(null); // shown once; opening any door retires it
     setView('page');
+    scrollTop(); // start reading at the top of the skeleton, not mid-old-page
     // Last 4 steps are enough context; unbounded history slows every deep tap.
     const priorTitles = (resetTo !== null ? [] : trail).map((p) => p.title).slice(-4);
     // Tree bookkeeping: capture the parent before the await.
@@ -603,6 +612,7 @@ export function useWander(user) {
     }
     setTrail((t) => t.slice(0, i + 1));
     setView('page');
+    scrollTop();
   }
 
   function openSaved(p) {
@@ -615,6 +625,7 @@ export function useWander(user) {
     visitedRef.current.push(page);
     setTrail([page]);
     setView('page');
+    scrollTop();
   }
 
   // Jump anywhere in the tree: rebuild the linear trail from root to that node.
@@ -632,6 +643,7 @@ export function useWander(user) {
     }
     setTrail(path);
     setView('page');
+    scrollTop();
   }
 
   // Update the current page in place, but only if the user hasn't navigated away.

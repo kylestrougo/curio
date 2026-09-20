@@ -2,6 +2,29 @@
 // appears in the text (case-insensitively); this finds those spans and makes
 // them tappable, keeping the blurb's original casing on screen.
 
+// A span, not a <button>: buttons are atomic inline-blocks that can't break
+// across lines, so splicing them in re-wraps the paragraph the moment the
+// finished page replaces the streamed text. A span wraps exactly like the
+// words it contains — the links appear without a single word moving.
+function TermLink({ term, shown, onOpen }) {
+  return (
+    <span
+      className="termlink"
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(term)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen(term);
+        }
+      }}
+    >
+      {shown}
+    </span>
+  );
+}
+
 // Non-overlapping [start, end, term] spans, longest term first so
 // "Royal Society" wins over "Royal", each term linked at most once.
 function findSpans(text, terms) {
@@ -48,9 +71,7 @@ export function MarkedProse({ text, onOpen, className }) {
     if (term && links < 4) {
       links += 1;
       parts.push(
-        <button type="button" className="termlink" key={open} onClick={() => onOpen(term)}>
-          {text.slice(open + 2, close)}
-        </button>
+        <TermLink key={open} term={term} shown={text.slice(open + 2, close)} onOpen={onOpen} />
       );
     } else {
       parts.push(text.slice(open + 2, close));
@@ -69,16 +90,7 @@ export default function LinkedBlurb({ text, terms, onOpen, className = 'blurb' }
   for (const [start, end] of spans) {
     if (start > cursor) parts.push(text.slice(cursor, start));
     const shown = text.slice(start, end);
-    parts.push(
-      <button
-        type="button"
-        className="termlink"
-        key={`${start}-${shown}`}
-        onClick={() => onOpen(shown)}
-      >
-        {shown}
-      </button>
-    );
+    parts.push(<TermLink key={`${start}-${shown}`} term={shown} shown={shown} onOpen={onOpen} />);
     cursor = end;
   }
   if (cursor < text.length) parts.push(text.slice(cursor));

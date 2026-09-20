@@ -241,6 +241,34 @@ class TestBlurbExtractor:
         text = self._run(['{"blu', 'rb": "found it"}'])
         assert text == "found it"
 
+    # The streamed characters must match the final parsed blurb, or the words
+    # the reader is mid-sentence in mutate (and re-wrap) when the page lands.
+
+    def test_leading_whitespace_is_swallowed(self):
+        # The final blurb is .strip()ed server-side; the stream matches.
+        text = self._run(['{"blurb": " \\n  leading gone."}'])
+        assert text == "leading gone."
+
+    def test_unicode_escape_decodes(self):
+        text = self._run(['{"blurb": "It\\u2019s here."}'])
+        assert text == "It’s here."
+
+    def test_unicode_escape_split_across_chunks(self):
+        text = self._run(['{"blurb": "a\\u20', "19b\"}"])
+        assert text == "a’b"
+
+    def test_surrogate_pair_becomes_one_character(self):
+        text = self._run(['{"blurb": "go \\ud83d\\ude00 now"}'])
+        assert text == "go \U0001f600 now"
+
+    def test_malformed_unicode_escape_falls_back_to_the_literal(self):
+        text = self._run(['{"blurb": "a\\u12zb"}'])
+        assert text == "au12zb"
+
+    def test_streamed_text_equals_the_parsed_blurb(self):
+        body = '{"blurb": "  It\\u2019s \\ud83d\\ude0a-shaped."}'
+        assert self._run([body]) == json.loads(body)["blurb"].strip()
+
 
 class TestPageStream:
     def _chain_one(self, app, model="m"):

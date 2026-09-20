@@ -320,16 +320,26 @@ class BlurbExtractor:
     exactly as before streaming existed.
 
     Handles: chunk boundaries anywhere (including mid-escape), \\" and \\n
-    escapes, and models that use curly quotes for the delimiters themselves.
+    escapes, \\uXXXX escapes (surrogate pairs included), and models that use
+    curly quotes for the delimiters themselves.
+
+    The streamed characters match the final parsed blurb exactly — leading
+    whitespace is swallowed like the final `.strip()` and \\uXXXX decodes to
+    the same code point json parsing yields — so the words the reader watched
+    arrive don't mutate (and re-wrap) when the finished page lands.
     """
 
     _QUOTES = '"“”'
+    _HEX = set("0123456789abcdefABCDEF")
 
     def __init__(self):
         self._buf = ""          # everything seen, used to find the key
         self._in_blurb = False
         self._done = False
         self._pending_escape = False
+        self._u_hex = None       # collecting the 4 hex digits of \uXXXX
+        self._hi_surrogate = None  # first half of a \uXXXX\uXXXX pair
+        self._started = False    # a non-space character has been emitted
 
     def feed(self, chunk: str) -> str:
         """Consume the next raw chunk, return blurb text ready to show."""
@@ -345,18 +355,57 @@ class BlurbExtractor:
                     continue
                 self._in_blurb = True
                 continue
-            if self._pending_escape:
-                self._pending_escape = False
-                out.append({"n": "\n", "t": "\t"}.get(ch, ch))
-                continue
-            if ch == "\\":
-                self._pending_escape = True
-                continue
-            if ch in self._QUOTES:
-                self._done = True
-                continue
-            out.append(ch)
+            self._take(ch, out)
         return "".join(out)
+
+    def _take(self, ch: str, out: list) -> None:
+        if self._u_hex is not None:
+            if ch in self._HEX:
+                self._u_hex += ch
+                if len(self._u_hex) == 4:
+                    self._finish_unicode(out)
+                return
+            # Malformed \uXXXX: give back the literal characters we held,
+            # then let the offending char run through the ordinary path.
+            self._emit("u" + self._u_hex, out)
+            self._u_hex = None
+        if self._pending_escape:
+            self._pending_escape = False
+            if ch == "u":
+                self._u_hex = ""
+                return
+            self._emit({"n": "\n", "t": "\t"}.get(ch, ch), out)
+            return
+        if ch == "\\":
+            self._pending_escape = True
+            return
+        if ch in self._QUOTES:
+            self._done = True
+            return
+        self._emit(ch, out)
+
+    def _finish_unicode(self, out: list) -> None:
+        code = int(self._u_hex, 16)
+        self._u_hex = None
+        if 0xD800 <= code <= 0xDBFF:
+            # High surrogate: hold it for the low half of the pair.
+            self._hi_surrogate = code
+            return
+        if self._hi_surrogate is not None and 0xDC00 <= code <= 0xDFFF:
+            code = 0x10000 + ((self._hi_surrogate - 0xD800) << 10) + (code - 0xDC00)
+        self._hi_surrogate = None
+        self._emit(chr(code), out)
+
+    def _emit(self, text: str, out: list) -> None:
+        # Mirror the final page's .strip(): whitespace before the first real
+        # character never hits the screen, so the streamed text starts on the
+        # same character the landed page does.
+        if not self._started:
+            text = text.lstrip()
+            if not text:
+                return
+            self._started = True
+        out.append(text)
 
     def _blurb_open(self) -> bool:
         """True the moment the buffer ends at `"blurb" ... : ... "`."""

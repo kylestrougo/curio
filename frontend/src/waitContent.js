@@ -18,13 +18,16 @@ function shuffled(list) {
 // interesting word blanked out. Returns {kind:'quiz', prefix, answer, suffix,
 // source} where prefix + answer + suffix is the original sentence, or null
 // when nothing usable exists (first door of a wander, or blurbs too odd).
-export function buildQuiz(pages) {
+// `used` is a Set of sentences already dealt this wait — a stack of cards
+// must never ask the same question twice.
+export function buildQuiz(pages, used) {
   for (const page of shuffled(pages || [])) {
     const text = String(page.blurb || '').replace(/\[\[|\]\]/g, '');
     // No lookbehind — the Pi's browser may be an older WebKit.
     const sentences = (text.match(/[^.!?]+[.!?]+/g) || [])
       .map((s) => s.trim())
-      .filter((s) => s.length >= 40 && s.length <= 160);
+      .filter((s) => s.length >= 40 && s.length <= 160)
+      .filter((s) => !(used && used.has(s)));
     for (const sentence of shuffled(sentences)) {
       const blank = pickBlank(sentence, page.terms);
       if (!blank) continue;
@@ -79,6 +82,6 @@ export function drawCurioCard() {
   return deck[cursor++];
 }
 
-export function pickWaitCard(pages) {
-  return buildQuiz(pages) || { kind: 'curio', text: drawCurioCard() };
+export function pickWaitCard(pages, used) {
+  return buildQuiz(pages, used) || { kind: 'curio', text: drawCurioCard() };
 }

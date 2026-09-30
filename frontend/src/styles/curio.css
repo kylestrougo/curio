@@ -382,6 +382,9 @@ table.stats td.wrap{white-space:normal; color:var(--ink-soft); min-width:180px;}
   background:var(--card); border:1px solid var(--line); border-radius:12px;
   padding:14px 16px; margin-top:24px; color:var(--ink); animation:fade .45s ease both;}
 button.wait-card{cursor:pointer;}
+/* follow-on cards in the pile sit close beneath the first, which keeps its
+   24px clearance from the loader above */
+.wait-card + .wait-card{margin-top:12px;}
 .wait-card .wc-eyebrow{font-family:'Inter',sans-serif; font-size:11px; letter-spacing:1.5px;
   text-transform:uppercase; color:var(--brass); font-weight:600; margin:0 0 8px;}
 .wait-card .wc-text{font-family:'Newsreader',serif; font-size:16.5px; line-height:1.5;

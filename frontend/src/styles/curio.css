@@ -40,11 +40,11 @@ body { margin: 0; background: #F4F2EB; }
 .trail{display:flex; gap:4px; align-items:center; overflow-x:auto; margin-top:12px;
   font-family:'Inter',sans-serif; font-size:12px; scrollbar-width:none; padding-bottom:2px;}
 .trail::-webkit-scrollbar{display:none;}
-.crumb{white-space:nowrap; color:var(--ink-soft); background:none; border:none; cursor:pointer;
+.crumb{flex:none; white-space:nowrap; color:var(--ink-soft); background:none; border:none; cursor:pointer;
   padding:2px 2px; transition:color .15s;}
 .crumb:hover{color:var(--ink);}
 .crumb.here{color:var(--ink); font-weight:600;}
-.sep{color:var(--line); font-size:11px;}
+.sep{flex:none; color:var(--line); font-size:11px;}
 
 /* home */
 .home{padding-top:34px; animation:fade .4s ease both;}
@@ -205,6 +205,13 @@ body { margin: 0; background: #F4F2EB; }
 .map-view{padding-top:30px; animation:fade .35s ease both;}
 .map-view h2{font-family:'Fraunces',serif; font-weight:400; font-size:27px; margin:0 0 6px;}
 .map-view .sub{color:var(--ink-soft); font-size:15px; margin:0 0 22px;}
+/* A deep trail indents every level; squeezed into what's left of the column,
+   long titles used to crush into a word-per-line sliver. The tree scrolls
+   sideways instead: every stop stays on one line, and depth costs a swipe,
+   not legibility. */
+.tree{overflow-x:auto; padding-bottom:8px; scrollbar-width:thin;}
+.tbranch{min-width:max-content;}
+.tnode .tlbl{white-space:nowrap;}
 .tbranch .tbranch{margin-left:9px; border-left:1px solid var(--line); padding-left:14px;}
 .tnode{display:flex; align-items:baseline; gap:9px; width:100%; text-align:left;
   background:none; border:none; cursor:pointer; padding:6px 2px;

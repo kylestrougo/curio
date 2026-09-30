@@ -62,12 +62,41 @@ function clearTopicalCache() {
   }
 }
 
+// Doors dealt on past visits, remembered per browser. This is what stops a
+// new session opening on last week's hand — without it both the first paint
+// (static pool) and the server (tiny exclude list) happily repeat themselves
+// across sessions. Advisory only: every access is guarded, and losing the
+// memory just means the odd familiar door.
+const DEALT_CACHE_KEY = 'curio:dealt:v1';
+// The shipped pool holds 92 doors; remembering most-but-never-all of them
+// keeps first paint fresh without ever leaving pickSeeds an empty pool.
+const DEALT_REMEMBERED = 60;
+
+// How long a hand may sit before coming back to home (or back to this tab)
+// quietly deals a fresh one. "Today's doors" shouldn't mean "the doors from
+// whenever the tab was opened".
+const HAND_STALE_MS = 10 * 60 * 1000;
+
+function readDealtCache() {
+  try {
+    const list = JSON.parse(localStorage.getItem(DEALT_CACHE_KEY));
+    return Array.isArray(list) ? list.filter((l) => typeof l === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function useWander(user) {
   const signedIn = !!(user && user.id != null);
 
   const [view, setView] = useState('home'); // home | page | saved | map | recap | auth | settings | admin
   const [trail, setTrail] = useState([]); // current linear path (page objects)
-  const [seeds, setSeeds] = useState(() => pickSeeds()); // instant first paint
+  const [seeds, setSeeds] = useState(() => {
+    // Instant first paint, avoiding doors remembered from past visits. If the
+    // memory ever outgrows the pool, a repeat beats a blank home.
+    const hand = pickSeeds(4, readDealtCache());
+    return hand.length ? hand : pickSeeds();
+  });
   const [saved, setSaved] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -91,8 +120,11 @@ export function useWander(user) {
   const didInit = useRef(false); // StrictMode double-mount guard
   const poolRef = useRef([...SEED_POOL]); // grows as the backend restocks it
   const seenRef = useRef(new Set()); // doors dealt in the current pass through the pool
-  const dealtRef = useRef(new Set()); // every door dealt this session — never reset
+  const dealtRef = useRef(null); // every door dealt — this session plus what past visits remember
+  if (dealtRef.current === null) dealtRef.current = new Set(readDealtCache());
   const refillingRef = useRef(false); // one restock call at a time
+  const seedsLoadingRef = useRef(false); // one hand refresh at a time
+  const handFreshAtRef = useRef(Date.now()); // when the main hand was last dealt
   const shufflesRef = useRef(0); // drives the periodic restock
   // The topical row keeps its own pool, same machinery as the main one.
   const topicalPoolRef = useRef([]);
@@ -125,11 +157,12 @@ export function useWander(user) {
     if (cached && cached.hand.length) {
       topicalPoolRef.current = cached.pool;
       setTopicalSeeds(cached.hand);
-      for (const s of cached.hand) {
-        topicalSeenRef.current.add(s.label);
-        dealtRef.current.add(s.label);
-      }
+      for (const s of cached.hand) topicalSeenRef.current.add(s.label);
+      markDealt(cached.hand.map((s) => s.label));
     }
+    // The first-paint hand counts as dealt too — otherwise tomorrow's first
+    // paint could deal today's doors right back.
+    markDealt(seedsRef.current.map((s) => s.label));
     loadSeeds();
     const params = new URLSearchParams(window.location.search);
     const door = params.get('door');
@@ -254,6 +287,22 @@ export function useWander(user) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, signedIn]);
 
+  // The main row ages too. Coming back to the home screen — or back to this
+  // tab — after the hand has sat a while deals a fresh one, so a session left
+  // open overnight doesn't greet the morning with yesterday's doors.
+  useEffect(() => {
+    if (view !== 'home') return;
+    const refreshIfStale = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (Date.now() - handFreshAtRef.current < HAND_STALE_MS) return;
+      loadSeeds();
+    };
+    refreshIfStale();
+    document.addEventListener('visibilitychange', refreshIfStale);
+    return () => document.removeEventListener('visibilitychange', refreshIfStale);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
   // ── server mirror helpers ──────────────────────────────────
 
   function ensureWander() {
@@ -331,12 +380,34 @@ export function useWander(user) {
     }
   }
 
+  // Every deal goes through here so the memory of dealt doors survives the
+  // session (capped — the tail is the recent past, which is what matters).
+  // Idempotent on purpose: StrictMode re-runs state updaters that call this.
+  function markDealt(labels) {
+    for (const l of labels) dealtRef.current.add(l);
+    try {
+      localStorage.setItem(
+        DEALT_CACHE_KEY,
+        JSON.stringify([...dealtRef.current].slice(-DEALT_REMEMBERED))
+      );
+    } catch {
+      /* storage blocked — the memory just lives for this session */
+    }
+  }
+
   async function loadSeeds() {
-    // Background refresh: home is already showing pool seeds. Only swap in
-    // fresh doors if the user hasn't started wandering.
+    // Background refresh: home is already showing pool seeds; fresh doors
+    // swap in with a fade. The exclude list is the remembered past, not just
+    // the four on screen — with only those four the server was free to
+    // regenerate last week's doors, and did.
+    if (seedsLoadingRef.current) return;
+    seedsLoadingRef.current = true;
     try {
       const onScreen = seedsRef.current.map((s) => s.label);
-      const j = await api.generateSeeds({ count: 4, exclude: onScreen });
+      const exclude = [
+        ...new Set([...[...dealtRef.current].slice(-RECENT_EXCLUDE), ...onScreen]),
+      ];
+      const j = await api.generateSeeds({ count: 4, exclude });
       // Take whatever came back rather than insisting on exactly 4. Free models
       // miscount constantly, and demanding 4 meant a perfectly good hand of 3
       // was thrown away — leaving the static pool on screen and making the app
@@ -347,11 +418,14 @@ export function useWander(user) {
         if (hand.length < 4) {
           hand.push(...pickSeeds(4 - hand.length, hand.map((s) => s.label), poolRef.current));
         }
-        for (const s of hand) dealtRef.current.add(s.label);
+        markDealt(hand.map((s) => s.label));
+        handFreshAtRef.current = Date.now();
         setSeeds(hand); // fresh doors, fades in
       }
     } catch {
       /* keep pool seeds */
+    } finally {
+      seedsLoadingRef.current = false;
     }
   }
 
@@ -383,11 +457,9 @@ export function useWander(user) {
     // Instant: deal 4 unseen doors. If the session has exhausted the pool,
     // recycle the oldest rather than ever making the user wait.
     setSeeds((currentSeeds) => {
-      for (const s of currentSeeds) {
-        seenRef.current.add(s.label);
-        dealtRef.current.add(s.label);
-      }
+      for (const s of currentSeeds) seenRef.current.add(s.label);
       const onScreen = currentSeeds.map((s) => s.label);
+      markDealt(onScreen);
       let fresh = pickSeeds(
         4,
         onScreen,
@@ -400,9 +472,10 @@ export function useWander(user) {
           ...pickSeeds(4 - fresh.length, [...onScreen, ...fresh.map((s) => s.label)], poolRef.current),
         ];
       }
-      for (const s of fresh) dealtRef.current.add(s.label);
+      markDealt(fresh.map((s) => s.label));
       return fresh;
     });
+    handFreshAtRef.current = Date.now(); // a shuffled hand is a fresh hand
     shufflesRef.current += 1;
     maybeRefillPool(shufflesRef.current % REFILL_EVERY === 0);
   }
@@ -448,10 +521,8 @@ export function useWander(user) {
       if (j.seeds && j.seeds.length) {
         addToTopicalPool(j.seeds);
         const hand = j.seeds.slice(0, 4);
-        for (const s of hand) {
-          topicalSeenRef.current.add(s.label);
-          dealtRef.current.add(s.label);
-        }
+        for (const s of hand) topicalSeenRef.current.add(s.label);
+        markDealt(hand.map((s) => s.label));
         setTopicalSeeds(hand);
       }
     } catch (e) {
@@ -509,11 +580,9 @@ export function useWander(user) {
 
   function shuffleTopicalDoors() {
     setTopicalSeeds((current) => {
-      for (const s of current) {
-        topicalSeenRef.current.add(s.label);
-        dealtRef.current.add(s.label);
-      }
+      for (const s of current) topicalSeenRef.current.add(s.label);
       const onScreen = current.map((s) => s.label);
+      markDealt(onScreen);
       let fresh = pickSeeds(
         4,
         onScreen,
@@ -526,7 +595,7 @@ export function useWander(user) {
           ...pickSeeds(4 - fresh.length, [...onScreen, ...fresh.map((s) => s.label)], topicalPoolRef.current),
         ];
       }
-      for (const s of fresh) dealtRef.current.add(s.label);
+      markDealt(fresh.map((s) => s.label));
       return fresh;
     });
     topicalShufflesRef.current += 1;

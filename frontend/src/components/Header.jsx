@@ -1,8 +1,16 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 
 export default function Header({ w, user, onSignOut }) {
   const { view, trail, saved, visitedRef, goToCrumb, setView } = w;
   const signedIn = !!(user && user.id != null);
+
+  // A long trail overflows to the right; keep the newest crumb — where the
+  // reader actually stands — in view. The older stops are a swipe away.
+  const trailRef = useRef(null);
+  useEffect(() => {
+    const el = trailRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [trail.length, view]);
 
   return (
     <div className="top">
@@ -51,7 +59,7 @@ export default function Header({ w, user, onSignOut }) {
       </div>
 
       {view === 'page' && (
-        <div className="trail">
+        <div className="trail" ref={trailRef}>
           <button className="crumb" onClick={() => goToCrumb(-1)}>
             Home
           </button>

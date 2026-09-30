@@ -3,7 +3,7 @@
 // deck cursor, so all of this can be unit-tested directly.
 import { CURIO_CARDS } from './data/curioCards.js';
 
-export const WAIT_CARD_DELAY_MS = 4000;
+export const WAIT_CARD_DELAY_MS = 2000;
 
 function shuffled(list) {
   const a = [...list];

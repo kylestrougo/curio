@@ -97,6 +97,64 @@ class TestGenerateStream:
             assert (row["model"], row["intent"], row["ok"]) == ("a", "more", 1)
 
 
+class TestGenerateStreamEvents:
+    """The tagged walk: status markers when the chain moves on, deltas for
+    content, and exactly the same failure semantics as the plain stream."""
+
+    def test_single_model_yields_only_deltas(self, app, monkeypatch):
+        _stub_stream(monkeypatch, {"a": ["x", "y"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a"])
+            events = list(llm.generate_stream_events("s", "u", "more"))
+        assert events == [("delta", "x"), ("delta", "y")]
+
+    def test_fallthrough_emits_status_before_next_models_deltas(self, app, monkeypatch):
+        _stub_stream(monkeypatch, {"a": llm.LLMError("HTTP 429"), "b": ["ok"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+            events = list(llm.generate_stream_events("s", "u", "more"))
+        assert events == [("status", {"attempt": 2}), ("delta", "ok")]
+
+    def test_empty_stream_fallthrough_also_emits_status(self, app, monkeypatch):
+        _stub_stream(monkeypatch, {"a": [], "b": ["ok"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+            events = list(llm.generate_stream_events("s", "u", "more"))
+        assert events == [("status", {"attempt": 2}), ("delta", "ok")]
+
+    def test_two_fallthroughs_number_the_attempts(self, app, monkeypatch):
+        _stub_stream(monkeypatch, {"a": llm.LLMError("x"), "b": [], "c": ["ok"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b", "c"])
+            events = list(llm.generate_stream_events("s", "u", "more"))
+        assert events == [
+            ("status", {"attempt": 2}),
+            ("status", {"attempt": 3}),
+            ("delta", "ok"),
+        ]
+
+    def test_compat_adapter_drops_status_tuples(self, app, monkeypatch):
+        # more/ask consume generate_stream; a status tuple leaking through
+        # would splice "{'attempt': 2}" into an answer on someone's screen.
+        _stub_stream(monkeypatch, {"a": llm.LLMError("x"), "b": ["ok"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+            assert list(llm.generate_stream("s", "u", "more")) == ["ok"]
+
+    def test_mid_stream_death_still_raises_through_events(self, app, monkeypatch):
+        def dies_midway():
+            yield "First half"
+            raise llm.LLMError("connection reset")
+
+        _stub_stream(monkeypatch, {"a": dies_midway, "b": ["never touched"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "b"])
+            gen = llm.generate_stream_events("s", "u", "more")
+            assert next(gen) == ("delta", "First half")
+            with pytest.raises(llm.LLMError, match="mid-answer"):
+                list(gen)
+
+
 def _frames(response):
     """Split an SSE body into (event, data) pairs."""
     out = []
@@ -191,6 +249,15 @@ class TestStreamEndpoints:
         r = client.post("/api/ask/stream", json={"title": "T", "said": "s", "question": "why?"})
         text = "".join(json.loads(d) for e, d in _frames(r) if e == "message")
         assert text == "An answer."
+
+    def test_more_stream_fallthrough_emits_no_status(self, client, app, monkeypatch):
+        # Only the page stream speaks status; more/ask keep their old wire
+        # format (the compat adapter drops the markers).
+        _stub_stream(monkeypatch, {"a": llm.LLMError("x"), "m": ["ok"]})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "m"])
+        r = client.post("/api/more/stream", json={"title": "T", "said": "s"})
+        assert "status" not in [e for e, _ in _frames(r)]
 
 
 PAGE_JSON_CHUNKS = [
@@ -336,6 +403,53 @@ class TestPageStream:
 
     def test_needs_a_label_unless_surprise(self, client):
         assert client.post("/api/page/stream", json={}).status_code == 400
+
+    def test_fallthrough_status_frame_precedes_blurb(self, client, app, monkeypatch):
+        _stub_stream(monkeypatch, {"a": llm.LLMError("dead"), "m": PAGE_JSON_CHUNKS})
+        with app.app_context():
+            llm.set_config_json(llm.CONFIG_KEY_CHAIN, ["a", "m"])
+        r = client.post("/api/page/stream", json={"label": "x", "kind": "fact"})
+        frames = _frames(r)
+        events = [e for e, _ in frames]
+        assert "status" in events
+        assert events.index("status") < events.index("message")
+        assert json.loads([d for e, d in frames if e == "status"][0]) == {"attempt": 2}
+        # The finished page is intact despite the swap.
+        assert json.loads([d for e, d in frames if e == "done"][0])["title"] == "Meanders"
+        # Which models were tried is infrastructure — it must never reach the
+        # wire, in the status frame or anywhere else.
+        for _, d in frames:
+            assert '"a"' not in d and '"m"' not in d
+
+    def test_failed_page_stream_refunds_quota(self, client, app, monkeypatch):
+        # The stream charges up front; a door that never opened gives the
+        # unit back, because the client's fallback to /api/page charges
+        # afresh — without the refund one failed door cost double.
+        _stub_stream(monkeypatch, {"m": llm.LLMError("dead")})
+        self._chain_one(app)
+        r = client.post("/api/page/stream", json={"label": "x", "kind": "fact"})
+        assert "error" in [e for e, _ in _frames(r)]
+        with app.app_context():
+            row = query("SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True)
+            assert row["count"] == 0
+
+    def test_unparseable_page_refunds_quota(self, client, app, monkeypatch):
+        _stub_stream(monkeypatch, {"m": ["complete", " garbage"]})
+        self._chain_one(app)
+        r = client.post("/api/page/stream", json={"label": "x", "kind": "fact"})
+        assert "error" in [e for e, _ in _frames(r)]
+        with app.app_context():
+            row = query("SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True)
+            assert row["count"] == 0
+
+    def test_empty_blurb_refunds_quota(self, client, app, monkeypatch):
+        _stub_stream(monkeypatch, {"m": ['{"title": "T", "blurb": "", "buttons": []}']})
+        self._chain_one(app)
+        r = client.post("/api/page/stream", json={"label": "x", "kind": "fact"})
+        assert "error" in [e for e, _ in _frames(r)]
+        with app.app_context():
+            row = query("SELECT count FROM usage_counters WHERE subject LIKE 'ip:%'", (), one=True)
+            assert row["count"] == 0
 
 
 class TestStreamEncoding:

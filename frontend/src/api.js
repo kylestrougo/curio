@@ -92,7 +92,7 @@ async function generate(path, body, tries = 3) {
 // token; a mid-stream death arrives as an SSE error event, and callers are
 // expected to retry the non-streaming endpoint (one fresh call, not a loop).
 
-async function streamText(path, body, onChunk) {
+async function streamText(path, body, onChunk, onStatus) {
   let res;
   try {
     res = await fetch(path, {
@@ -149,7 +149,20 @@ async function streamText(path, body, onChunk) {
       if (event === 'error') {
         throw new ApiError(502, 'stream_failed', dataStr ? JSON.parse(dataStr) : 'The stream broke off.');
       }
-      if (dataStr) {
+      if (event === 'status') {
+        // Server-side progress (e.g. {attempt: 2} — trying another model).
+        if (onStatus && dataStr) {
+          try {
+            onStatus(JSON.parse(dataStr));
+          } catch {
+            // A malformed status frame is cosmetic — never fatal.
+          }
+        }
+        continue;
+      }
+      // Only unnamed frames are text; an event name this client doesn't know
+      // must not leak into the blurb.
+      if (event === 'message' && dataStr) {
         const chunk = JSON.parse(dataStr);
         full += chunk;
         if (onChunk) onChunk(chunk, full);
@@ -187,14 +200,17 @@ export async function streamAsk({ title, said, question }, onChunk) {
 
 // Streaming door-open: onChunk receives blurb text as the model writes it;
 // resolves with the finished page {title, blurb, buttons}. Falls back to the
-// JSON endpoint on any stream failure except quota.
-export async function streamPage(body, onChunk) {
+// JSON endpoint on any stream failure except quota. onStatus (optional) hears
+// {attempt} while the server walks its chain and {fallback: true} when the
+// stream is abandoned for the slower JSON path.
+export async function streamPage(body, onChunk, onStatus) {
   try {
-    const r = await streamText('/api/page/stream', body, onChunk);
+    const r = await streamText('/api/page/stream', body, onChunk, onStatus);
     if (r.done && r.done.title) return r.done;
     throw new ApiError(502, 'stream_failed', 'The page never finished.');
   } catch (e) {
     if (e instanceof ApiError && e.quota) throw e;
+    if (onStatus) onStatus({ fallback: true });
     return generatePage(body);
   }
 }

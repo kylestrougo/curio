@@ -14,7 +14,7 @@ from flask_login import current_user, login_required
 
 from . import pagecache, prompts
 from .db import execute, get_db, query
-from .llm import LLMError, generate, generate_stream
+from .llm import LLMError, generate, generate_stream, generate_stream_events
 from .ratelimit import check_and_count_generation, refund_generation
 
 log = logging.getLogger(__name__)
@@ -540,13 +540,23 @@ def page_stream():
         extractor = BlurbExtractor()
         raw_parts = []
         try:
-            for chunk in generate_stream(system, user, "page"):
-                raw_parts.append(chunk)
-                text = extractor.feed(chunk)
+            for kind_, payload in generate_stream_events(system, user, "page"):
+                if kind_ == "status":
+                    # The chain moved on to another model. Just the attempt
+                    # number crosses the wire — the client turns it into a
+                    # caption; model names stay server-side.
+                    yield f"event: status\ndata: {json.dumps(payload)}\n\n"
+                    continue
+                raw_parts.append(payload)
+                text = extractor.feed(payload)
                 if text:
                     yield f"data: {json.dumps(text)}\n\n"
         except LLMError as exc:
             log.error("page stream failed: %s", exc)
+            # No page reached the reader; give the quota unit back. The
+            # client's next move is the non-streaming fallback, which charges
+            # afresh — without this a failed door cost double.
+            refund_generation()
             yield f"event: error\ndata: {json.dumps('That door did not open.')}\n\n"
             return
 
@@ -556,12 +566,14 @@ def page_stream():
         try:
             parsed = parse_json_loose("".join(raw_parts))
         except ValueError:
+            refund_generation()
             yield f"event: error\ndata: {json.dumps('The page came back scrambled. Try again.')}\n\n"
             return
         buttons = _normalise_buttons(parsed.get("buttons"))
         title = _clean_text(parsed.get("title"), 300) or label or "Somewhere unexpected"
         blurb = _clean_text(parsed.get("blurb"), 1200)
         if not blurb:
+            refund_generation()
             yield f"event: error\ndata: {json.dumps('The page came back empty. Try again.')}\n\n"
             return
         terms = _normalise_terms(parsed.get("terms"), blurb, title)

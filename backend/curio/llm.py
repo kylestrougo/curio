@@ -305,8 +305,12 @@ def _post_stream(
         res.close()
 
 
-def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000):
-    """Yield prose chunks, walking the chain — but only UNTIL first content.
+def generate_stream_events(system: str, user: str, intent: str, max_tokens: int = 1000):
+    """Yield ("delta", chunk) prose events, walking the chain — but only
+    UNTIL first content — plus ("status", {"attempt": n}) when the walk moves
+    on to its nth model, so a caller can tell the reader the wait is a retry
+    rather than a hang. The payload carries only the attempt number: which
+    models are being tried is infrastructure, not something for the screen.
 
     The fallback chain and streaming are fundamentally at odds: once a byte
     has reached the client, silently switching to another model would splice
@@ -329,10 +333,12 @@ def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000)
     # NEW attempts check it; a stream already delivering tokens is never cut.
     deadline = time.monotonic() + current_app.config["GENERATION_BUDGET"]
     last_error = "no models attempted"
-    for model in chain:
+    for attempt, model in enumerate(chain, 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise LLMError(f"generation budget exhausted; last: {last_error}")
+        if attempt > 1:
+            yield ("status", {"attempt": attempt})
         started = time.monotonic()
         yielded = False
         try:
@@ -343,7 +349,7 @@ def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000)
                 if not yielded:
                     yielded = True
                     _record(model, intent, True, int((time.monotonic() - started) * 1000), None)
-                yield chunk
+                yield ("delta", chunk)
             if yielded:
                 return
             # Stream closed without a single token: treat as this model failing.
@@ -360,6 +366,14 @@ def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000)
             log.warning("model %s failed before first token (%s) — falling through", model, last_error)
 
     raise LLMError(last_error)
+
+
+def generate_stream(system: str, user: str, intent: str, max_tokens: int = 1000):
+    """Chunks only — the events walk with the status markers dropped, for
+    callers (more/ask) whose SSE protocol has no status frame."""
+    for kind, payload in generate_stream_events(system, user, intent, max_tokens):
+        if kind == "delta":
+            yield payload
 
 
 def generate(

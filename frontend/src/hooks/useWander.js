@@ -83,6 +83,7 @@ export function useWander(user) {
   const [streamingMore, setStreamingMore] = useState(null); // prose arriving token by token
   const [streamingQa, setStreamingQa] = useState(null); // {q, a} arriving token by token
   const [streamingBlurb, setStreamingBlurb] = useState(''); // page blurb arriving as the door opens
+  const [streamStatus, setStreamStatus] = useState(null); // {attempt} | {fallback:true} while a door opens
   const [shareState, setShareState] = useState('idle'); // idle | busy | copied
 
   const scrollRef = useRef(null);
@@ -539,8 +540,11 @@ export function useWander(user) {
     setLoading(true);
     setError(null);
     // The tapped door is known before any network happens — the loading view
-    // shows it as a provisional title instead of a bare spinner.
-    setPendingDoor({ label: surprise ? null : label, type, surprise });
+    // shows it as a provisional title instead of a bare spinner. reqSeq gives
+    // the loading view a per-tap key that works even for label-less surprise
+    // doors (caption timers and the wait card reset on every tap).
+    setPendingDoor({ label: surprise ? null : label, type, surprise, reqSeq: myReq });
+    setStreamStatus(null);
     clearPageExtras();
     setResumeHint(null); // shown once; opening any door retires it
     setView('page');
@@ -566,6 +570,12 @@ export function useWander(user) {
         // taps the same way the final result is.
         (_chunk, full) => {
           if (myReq === reqId.current) setStreamingBlurb(full);
+        },
+        // Honest wait news — the server moved to another model, or the
+        // stream gave way to the slower JSON path. The loading caption
+        // turns it into words; no model names ever arrive here.
+        (status) => {
+          if (myReq === reqId.current) setStreamStatus(status);
         }
       );
       if (myReq !== reqId.current) return; // user navigated away — drop stale result
@@ -589,6 +599,7 @@ export function useWander(user) {
         setLoading(false);
         setPendingDoor(null);
         setStreamingBlurb('');
+        setStreamStatus(null);
       }
     }
   }
@@ -1022,6 +1033,7 @@ export function useWander(user) {
     resumeHint,
     pendingDoor,
     streamingBlurb,
+    streamStatus,
     streamingMore,
     streamingQa,
     shareState,

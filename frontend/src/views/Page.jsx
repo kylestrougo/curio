@@ -41,6 +41,7 @@ export default function Page({ w }) {
     visitedRef,
     pendingDoor,
     streamingBlurb,
+    streamStatus,
     streamingMore,
     streamingQa,
     sharePage,
@@ -63,7 +64,7 @@ export default function Page({ w }) {
             <p className="blurb streaming">{streamingBlurb}</p>
           </div>
         ) : (
-          <StagedLoading door={pendingDoor} />
+          <StagedLoading door={pendingDoor} status={streamStatus} trailPages={visitedRef.current} />
         )
       ) : error ? (
         <div className="errline">

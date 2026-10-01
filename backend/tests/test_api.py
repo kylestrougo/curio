@@ -156,6 +156,39 @@ class TestSavedRecaps:
         assert client.post(f"/api/wanders/{wander}/save-recap", json={}).status_code == 404
         assert client.delete(f"/api/wanders/{wander}/save-recap").status_code == 404
 
+    def test_wander_list_counts_doors_and_branches(self, client):
+        wander = self._wander(client)
+
+        def page(node, parent, title):
+            r = client.post(
+                f"/api/wanders/{wander}/pages",
+                json={"clientNodeId": node, "parentClientNodeId": parent, "title": title, "blurb": "b"},
+            )
+            assert r.status_code == 201
+
+        # A walk with one doubling-back: a → b → c, back to b → d, plus a
+        # fresh start e. Leaves (branch tips): c, d, e.
+        page(1, None, "a")
+        page(2, 1, "b")
+        page(3, 2, "c")
+        page(4, 2, "d")
+        page(5, None, "e")
+        row = self._listed(client, wander)
+        assert row["pageCount"] == 5
+        assert row["branchCount"] == 3
+
+    def test_branch_count_is_one_for_a_straight_walk_and_zero_when_empty(self, client):
+        wander = self._wander(client)
+        assert self._listed(client, wander)["branchCount"] == 0
+        for i in range(3):
+            client.post(
+                f"/api/wanders/{wander}/pages",
+                json={"clientNodeId": i + 1, "parentClientNodeId": i or None, "title": "t", "blurb": "b"},
+            )
+        row = self._listed(client, wander)
+        assert row["pageCount"] == 3
+        assert row["branchCount"] == 1
+
     def test_save_flags_the_recap_the_close_stored(self, client):
         wander = self._wander(client)
         client.post(f"/api/wanders/{wander}/close", json={"recap": self.RECAP})

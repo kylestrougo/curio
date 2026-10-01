@@ -660,6 +660,7 @@ def list_wanders():
         """
         SELECT w.id, w.started_at, w.closed_at, w.recap_json, w.recap_saved,
                COUNT(p.id) AS page_count,
+               COUNT(DISTINCT p.parent_client_node_id) AS parent_count,
                MIN(p.id)   AS first_page,
                MAX(p.id)   AS last_page
         FROM wanders w
@@ -684,11 +685,15 @@ def list_wanders():
             recap_data = json.loads(r["recap_json"]) if r["recap_json"] else None
         except ValueError:
             recap_data = None
+        # Branches = leaves of the tree: every page minus the ones some other
+        # page hangs off (distinct parents). A straight walk counts as one.
+        branch_count = max(r["page_count"] - r["parent_count"], 1 if r["page_count"] else 0)
         out.append({
             "id": r["id"],
             "startedAt": r["started_at"],
             "closedAt": r["closed_at"],
             "pageCount": r["page_count"],
+            "branchCount": branch_count,
             "firstTitle": titles.get(r["first_page"]),
             "lastTitle": titles.get(r["last_page"]),
             "recap": recap_data,

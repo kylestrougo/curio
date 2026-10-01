@@ -158,6 +158,12 @@ body { margin: 0; background: #F4F2EB; }
 .closed-wander .recap-path{margin-bottom:12px;}
 .cw-synth{font-size:17.5px; margin-bottom:14px;}
 .closed-wander .thread-q{font-size:16px;}
+/* the saved wander's map, unfolded below its recap */
+.cw-trail{margin-top:16px; border-top:1px solid var(--line);}
+.cw-trail-note{font-family:'Inter',sans-serif; font-size:12.5px; color:var(--ink-soft);
+  margin:14px 0 0;}
+/* the card is --card, not paper, so the dot halo matches it here */
+.cw-trail .wnode .tdot{box-shadow:0 0 0 3px var(--card);}
 
 /* states */
 .loading{display:flex; align-items:center; gap:12px; color:var(--ink-soft); font-size:16px; padding:38px 2px; animation:fade .3s both;}

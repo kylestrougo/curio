@@ -205,22 +205,32 @@ body { margin: 0; background: #F4F2EB; }
 .map-view{padding-top:30px; animation:fade .35s ease both;}
 .map-view h2{font-family:'Fraunces',serif; font-weight:400; font-size:27px; margin:0 0 6px;}
 .map-view .sub{color:var(--ink-soft); font-size:15px; margin:0 0 22px;}
-/* A deep trail indents every level; squeezed into what's left of the column,
-   long titles used to crush into a word-per-line sliver. The tree scrolls
-   sideways instead: every stop stays on one line, and depth costs a swipe,
-   not legibility. */
-.tree{overflow-x:auto; padding-bottom:8px; scrollbar-width:thin;}
-.tbranch{min-width:max-content;}
-.tnode .tlbl{white-space:nowrap;}
-.tbranch .tbranch{margin-left:9px; border-left:1px solid var(--line); padding-left:14px;}
-.tnode{display:flex; align-items:baseline; gap:9px; width:100%; text-align:left;
-  background:none; border:none; cursor:pointer; padding:6px 2px;
-  font-family:'Newsreader',serif; font-size:17px; line-height:1.35; color:var(--ink-soft);
-  transition:color .15s;}
-.tnode:hover{color:var(--ink);}
-.tnode.here{color:var(--ink); font-weight:600;}
-.tnode.here .tlbl::after{content:" — you are here"; font-family:'Inter',sans-serif;
-  font-size:11px; font-weight:500; letter-spacing:.5px; color:var(--brass);}
+/* The winding road: rows of stops, direction alternating, dashed brass
+   connectors. The whole path always fits the column width — long titles wrap
+   inside their stop, and a long wander grows downward, never sideways. */
+.spath{display:flex; flex-direction:column; gap:26px; padding:4px 0 8px;}
+.srow{display:flex; gap:18px;}
+.srow.rev{flex-direction:row-reverse;}
+.snode{position:relative; width:calc((100% - 36px)/3); flex:none;
+  display:flex; flex-direction:column; align-items:flex-start; gap:5px;
+  background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:10px 11px 12px; cursor:pointer; text-align:left;
+  font-family:'Newsreader',serif; font-size:15px; line-height:1.3;
+  color:var(--ink-soft); transition:color .15s, border-color .15s;}
+.snode:hover{color:var(--ink);}
+.snode.here{border-color:var(--brass); color:var(--ink); font-weight:600;}
+.slbl{overflow-wrap:anywhere;}
+.svia{font-family:'Inter',sans-serif; font-size:10.5px; letter-spacing:.4px;
+  color:var(--ink-soft); opacity:.85;}
+.shere{font-family:'Inter',sans-serif; font-size:11px; font-weight:500;
+  letter-spacing:.5px; color:var(--brass);}
+/* connectors — the dashes of the road, one per stop: toward the neighbour,
+   or down to the next row where the direction flips */
+.snode.c-h::after{content:""; position:absolute; top:50%; right:-18px;
+  width:18px; border-top:2px dashed rgba(169,120,31,.5);}
+.srow.rev .snode.c-h::after{right:auto; left:-18px;}
+.snode.c-v::after{content:""; position:absolute; left:50%; bottom:-28px;
+  height:28px; border-left:2px dashed rgba(169,120,31,.5);}
 .tdot{width:7px; height:7px; border-radius:50%; flex:none; background:var(--green); transform:translateY(-1px);}
 .tdot.fact{background:var(--slate);} .tdot.question{background:var(--brass);} .tdot.topic{background:var(--green);}
 

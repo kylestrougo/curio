@@ -38,13 +38,13 @@ body { margin: 0; background: #F4F2EB; }
 .saved-btn b{color:var(--brass); font-weight:600;}
 
 .trail{display:flex; gap:4px; align-items:center; overflow-x:auto; margin-top:12px;
-  font-family:'Inter',sans-serif; font-size:12px; scrollbar-width:none; padding-bottom:2px;}
+  font-family:'Inter',sans-serif; font-size:14px; scrollbar-width:none; padding-bottom:2px;}
 .trail::-webkit-scrollbar{display:none;}
 .crumb{flex:none; white-space:nowrap; color:var(--ink-soft); background:none; border:none; cursor:pointer;
-  padding:2px 2px; transition:color .15s;}
+  padding:2px 2px; font:inherit; transition:color .15s;}
 .crumb:hover{color:var(--ink);}
 .crumb.here{color:var(--ink); font-weight:600;}
-.sep{flex:none; color:var(--line); font-size:11px;}
+.sep{flex:none; color:var(--line); font-size:12.5px;}
 
 /* home */
 .home{padding-top:34px; animation:fade .4s ease both;}

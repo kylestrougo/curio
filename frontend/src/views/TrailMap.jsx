@@ -7,7 +7,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 // the map: a second path peels off the same dot. The full width always fits
 // the column — a long wander grows downward, never sideways.
 // Tapping any stop rebuilds the linear trail from root to that node.
-const STEP_Y = 86; // vertical distance between stops
+const STEP_Y = 86; // minimum vertical distance between stops
+const GAP_Y = 26; // minimum clear air between two labels
 const TOP_PAD = 26;
 const BOT_PAD = 20;
 
@@ -48,6 +49,7 @@ function curve(a, b) {
 export default function TrailMap({ w }) {
   const { visitedRef, current, jumpToNode, closeWander } = w;
   const visited = visitedRef.current;
+  const flat = flatten(visited);
 
   // The curve needs real pixels; measure the column and redo on resize.
   const boxRef = useRef(null);
@@ -61,6 +63,28 @@ export default function TrailMap({ w }) {
     return () => window.removeEventListener('resize', measure);
   }, []);
 
+  // Wrapped titles make stops different heights, so even spacing would let a
+  // tall label bleed into its neighbour. After each render that can change a
+  // height (new width, new stop, "you are here" moving), measure the real
+  // label boxes and push stops apart just enough that none can touch. Runs
+  // before paint, so the corrected layout is the only one ever seen.
+  const nodeRefs = useRef([]);
+  const [layout, setLayout] = useState(null); // {ys:[...], height}
+  useLayoutEffect(() => {
+    if (!wid || !flat.length) return;
+    const hs = flat.map((_, i) => {
+      const el = nodeRefs.current[i];
+      return el ? el.offsetHeight : 28;
+    });
+    const ys = [TOP_PAD + Math.max(hs[0] / 2, STEP_Y / 3)];
+    for (let i = 1; i < flat.length; i++) {
+      ys.push(Math.max(ys[i - 1] + STEP_Y, ys[i - 1] + hs[i - 1] / 2 + GAP_Y + hs[i] / 2));
+    }
+    const height = ys[ys.length - 1] + hs[hs.length - 1] / 2 + BOT_PAD;
+    setLayout({ ys, height });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wid, visited.length, current && current.nodeId]);
+
   // A long wander puts "you are here" far down the page; bring it into view.
   // The rAF defers past useWander's scroll-to-top on view change (parent
   // effects run after child effects), so this wins.
@@ -72,10 +96,14 @@ export default function TrailMap({ w }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  const flat = flatten(visited);
-  const pos = new Map(); // nodeId -> {x, y, n}
-  flat.forEach((n, i) => pos.set(n.nodeId, { x: wid * waveU(i), y: TOP_PAD + i * STEP_Y, n }));
-  const height = flat.length ? TOP_PAD + (flat.length - 1) * STEP_Y + BOT_PAD : 0;
+  const pos = new Map(); // nodeId -> {x, y}
+  flat.forEach((n, i) => {
+    pos.set(n.nodeId, {
+      x: wid * waveU(i),
+      y: layout && layout.ys[i] != null ? layout.ys[i] : TOP_PAD + i * STEP_Y,
+    });
+  });
+  const height = layout ? layout.height : flat.length * STEP_Y + TOP_PAD + BOT_PAD;
 
   // Every tree edge becomes a curve. The one feeding the stop right below is
   // the trail itself; a longer reach back to its parent is a fork peeling off.
@@ -107,7 +135,7 @@ export default function TrailMap({ w }) {
                   <path key={e.key} className={e.fork ? 'wtrail fork' : 'wtrail'} d={e.d} />
                 ))}
               </svg>
-              {flat.map((n) => {
+              {flat.map((n, i) => {
                 const p = pos.get(n.nodeId);
                 const here = current && current.nodeId === n.nodeId;
                 // Label sits on whichever side has the room.
@@ -117,7 +145,10 @@ export default function TrailMap({ w }) {
                     type="button"
                     className={'wnode' + (lft ? ' lft' : '') + (here ? ' here' : '')}
                     key={n.nodeId}
-                    ref={here ? hereRef : undefined}
+                    ref={(el) => {
+                      nodeRefs.current[i] = el;
+                      if (here) hereRef.current = el;
+                    }}
                     style={{ left: p.x, top: p.y }}
                     onClick={() => jumpToNode(n)}
                   >

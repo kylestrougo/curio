@@ -205,32 +205,33 @@ body { margin: 0; background: #F4F2EB; }
 .map-view{padding-top:30px; animation:fade .35s ease both;}
 .map-view h2{font-family:'Fraunces',serif; font-weight:400; font-size:27px; margin:0 0 6px;}
 .map-view .sub{color:var(--ink-soft); font-size:15px; margin:0 0 22px;}
-/* The winding road: rows of stops, direction alternating, dashed brass
-   connectors. The whole path always fits the column width — long titles wrap
-   inside their stop, and a long wander grows downward, never sideways. */
-.spath{display:flex; flex-direction:column; gap:26px; padding:4px 0 8px;}
-.srow{display:flex; gap:18px;}
-.srow.rev{flex-direction:row-reverse;}
-.snode{position:relative; width:calc((100% - 36px)/3); flex:none;
-  display:flex; flex-direction:column; align-items:flex-start; gap:5px;
-  background:var(--card); border:1px solid var(--line); border-radius:10px;
-  padding:10px 11px 12px; cursor:pointer; text-align:left;
-  font-family:'Newsreader',serif; font-size:15px; line-height:1.3;
-  color:var(--ink-soft); transition:color .15s, border-color .15s;}
-.snode:hover{color:var(--ink);}
-.snode.here{border-color:var(--brass); color:var(--ink); font-weight:600;}
-.slbl{overflow-wrap:anywhere;}
+/* The wandering trail: dots on a meandering dashed curve down the page, one
+   stop per line of travel. Forks really fork — a second curve peels off the
+   parent dot. The full width always fits the column; a long wander grows
+   downward, never sideways. */
+.wind{position:relative;}
+.wsvg{position:absolute; inset:0; pointer-events:none;}
+.wtrail{fill:none; stroke:rgba(169,120,31,.5); stroke-width:2;
+  stroke-dasharray:6 7; stroke-linecap:round;}
+.wtrail.fork{stroke:rgba(62,92,118,.42);}
+.wnode{position:absolute; display:flex; align-items:center; gap:9px; max-width:48%;
+  transform:translate(-13px,-50%); background:none; border:none; padding:3px 4px;
+  cursor:pointer; text-align:left; font-family:'Newsreader',serif; font-size:15.5px;
+  line-height:1.3; color:var(--ink-soft); transition:color .15s;}
+.wnode.lft{flex-direction:row-reverse; transform:translate(calc(-100% + 13px),-50%);
+  text-align:right;}
+.wnode:hover{color:var(--ink);}
+.wnode.here{color:var(--ink); font-weight:600;}
+/* the dot sits on the trail; a paper halo lets the path dive under it */
+.wnode .tdot{width:11px; height:11px; transform:none; box-shadow:0 0 0 3px var(--paper);}
+.wnode.here .tdot{box-shadow:0 0 0 3px var(--paper), 0 0 0 5px var(--brass);}
+.wtxt{display:flex; flex-direction:column; gap:1px; min-width:0;}
+.wnode.lft .wtxt{align-items:flex-end;}
+.wlbl{overflow-wrap:anywhere;}
 .svia{font-family:'Inter',sans-serif; font-size:10.5px; letter-spacing:.4px;
   color:var(--ink-soft); opacity:.85;}
 .shere{font-family:'Inter',sans-serif; font-size:11px; font-weight:500;
   letter-spacing:.5px; color:var(--brass);}
-/* connectors — the dashes of the road, one per stop: toward the neighbour,
-   or down to the next row where the direction flips */
-.snode.c-h::after{content:""; position:absolute; top:50%; right:-18px;
-  width:18px; border-top:2px dashed rgba(169,120,31,.5);}
-.srow.rev .snode.c-h::after{right:auto; left:-18px;}
-.snode.c-v::after{content:""; position:absolute; left:50%; bottom:-28px;
-  height:28px; border-left:2px dashed rgba(169,120,31,.5);}
 .tdot{width:7px; height:7px; border-radius:50%; flex:none; background:var(--green); transform:translateY(-1px);}
 .tdot.fact{background:var(--slate);} .tdot.question{background:var(--brass);} .tdot.topic{background:var(--green);}
 
